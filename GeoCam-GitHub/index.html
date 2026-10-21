@@ -1,0 +1,615 @@
+<!doctype html>
+<html lang="hi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#121a16">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>GeoCam HD</title>
+<link href="https://fonts.googleapis.com/css2?family=Mukta:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#121a16; --band:#1d2420; --haldi:#e8a93a; --paper:#f2efe6; --muted:#b9c2bb; --danger:#e0674f;
+  --safe-t:env(safe-area-inset-top,0px); --safe-b:env(safe-area-inset-bottom,0px);
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;background:#000;color:var(--paper);
+  font-family:Mukta,"Noto Sans Devanagari",system-ui,sans-serif;-webkit-tap-highlight-color:transparent}
+button,input{font:inherit;color:inherit}
+button{border:0;cursor:pointer}
+button:focus-visible,input:focus-visible{outline:3px solid var(--haldi);outline-offset:2px}
+
+#cam{position:fixed;inset:0;overflow:hidden}
+video{width:100%;height:100%;object-fit:cover;background:#000}
+.mirror{transform:scaleX(-1)}
+
+.topwrap{position:absolute;left:0;right:0;top:0;padding-top:var(--safe-t);background:rgba(0,0,0,.4)}
+.offbar{background:#c0392b;color:#fff;font-weight:700;font-size:15px;text-align:center;padding:9px 12px;line-height:1.3}
+.brand{margin-left:auto;font-weight:700;font-size:17px}
+.top{padding:10px 12px;
+  display:flex;gap:8px;align-items:center}
+.chip{display:flex;align-items:center;gap:7px;padding:6px 11px;border-radius:999px;
+  background:rgba(18,26,22,.8);font-size:14px;font-weight:600;white-space:nowrap}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--haldi);animation:pulse 1.2s infinite}
+#gps[data-state="ok"] .dot{background:#5fd18f;animation:none}
+#gps[data-state="weak"] .dot{background:var(--haldi);animation:none}
+#gps[data-state="off"] .dot{background:var(--danger);animation:none}
+@keyframes pulse{50%{opacity:.3}}
+
+.bottom{position:absolute;left:0;right:0;bottom:0;padding:0 12px calc(var(--safe-b) + 18px);
+  display:flex;flex-direction:column;gap:10px;background:rgba(0,0,0,.45)}
+  background:rgba(18,26,22,.85);font-size:16px}
+.live{background:rgba(29,36,32,.9);border-radius:10px;padding:9px 13px;font-size:14px;line-height:1.35}
+.live p{margin:0}
+#liveCo{color:var(--muted);font-size:13px;margin-top:2px}
+.controls{display:flex;justify-content:space-between;align-items:center;padding:4px 16px 0}
+.round{width:52px;height:52px;border-radius:50%;background:rgba(18,26,22,.8);display:grid;place-items:center}
+.shutter{width:76px;height:76px;border-radius:50%;background:var(--paper);
+  box-shadow:0 0 0 5px rgba(0,0,0,.35),0 0 0 9px var(--haldi);transition:transform .08s}
+.shutter:active{transform:scale(.92)}
+.spacer{width:52px;height:52px}
+
+.msg{position:absolute;left:20px;right:20px;top:35%;margin:0;padding:16px;border-radius:10px;
+  background:var(--band);text-align:center;font-size:16px;line-height:1.45}
+
+.screen{position:fixed;inset:0;background:var(--ink);display:flex;flex-direction:column;padding-top:var(--safe-t)}
+.shotWrap{flex:1;min-height:0;display:grid;place-items:center;padding:12px}
+#shot{max-width:100%;max-height:100%;object-fit:contain;border-radius:4px}
+.actions{display:flex;gap:10px;padding:12px 14px calc(var(--safe-b) + 16px)}
+.actions button{flex:1;height:50px;border-radius:10px;background:var(--band);font-weight:600;font-size:16px}
+.primary{background:var(--haldi)!important;color:var(--ink);font-weight:700!important}
+.meta{text-align:center;color:var(--muted);font-size:13px;margin:0 0 4px}
+.cats{display:flex;gap:8px;overflow-x:auto;padding:4px 14px;scrollbar-width:none}
+.cats::-webkit-scrollbar{display:none}
+.cat{flex:0 0 auto;height:34px;padding:0 14px;border-radius:999px;background:var(--band);color:var(--muted);font-size:14px;font-weight:600}
+.cat[aria-selected="true"]{background:var(--paper);color:var(--ink)}
+.filters{display:flex;gap:10px;overflow-x:auto;padding:6px 14px 4px;scrollbar-width:none}
+.filters::-webkit-scrollbar{display:none}
+.fbtn{flex:0 0 auto;display:flex;flex-direction:column;align-items:center;gap:5px;background:transparent;padding:0;
+  font-size:13px;line-height:1.15;text-align:center;color:var(--muted);width:76px}
+.fbtn img{width:64px;height:64px;object-fit:cover;border-radius:10px;border:3px solid transparent}
+.fbtn[aria-checked="true"]{color:var(--paper);font-weight:600}
+.fbtn[aria-checked="true"] img{border-color:var(--haldi)}
+
+
+#busy{position:fixed;inset:0;background:rgba(18,26,22,.9);display:grid;place-content:center;justify-items:center;gap:14px;font-size:17px;z-index:4}
+.spin{width:44px;height:44px;border-radius:50%;border:4px solid rgba(255,255,255,.2);border-top-color:var(--haldi);animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+#toast{position:fixed;left:16px;right:16px;top:calc(var(--safe-t) + 70px);padding:12px 14px;border-radius:10px;
+  background:var(--paper);color:var(--ink);font-weight:600;text-align:center;z-index:5}
+[hidden]{display:none!important}
+@media (prefers-reduced-motion:reduce){.dot,.spin{animation:none}}
+</style>
+</head>
+<body>
+
+<main id="cam">
+  <video id="video" autoplay playsinline muted></video>
+  <p id="camMsg" class="msg" hidden></p>
+  <div class="topwrap">
+    <div id="offBar" class="offbar" role="alert" hidden>Offline hai: photo par address nahi aayega, baaki details aayengi</div>
+    <header class="top">
+      <div id="gps" class="chip" data-state="wait"><span class="dot"></span><span id="gpsTxt">GPS dhoondh raha hai…</span></div>
+      <span class="brand">GeoCam HD</span>
+    </header>
+  </div>
+  <section class="bottom">
+    <div class="live" aria-live="polite">
+      <p id="liveAddr">Location ka intezaar…</p>
+      <p id="liveCo"></p>
+    </div>
+    <nav class="controls">
+      <button id="flip" class="round" aria-label="Camera badlein">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 15.5-6.2L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.2L3 16"/><path d="M3 21v-5h5"/></svg>
+      </button>
+      <button id="shutter" class="shutter" aria-label="Photo khinchein"></button>
+      <span class="spacer" aria-hidden="true"></span>
+    </nav>
+  </section>
+</main>
+
+<section id="review" class="screen" hidden>
+  <div class="shotWrap"><img id="shot" alt="Khinchi gayi photo"></div>
+  <p id="shotMeta" class="meta"></p>
+  <div id="cats" class="cats" role="tablist" aria-label="Preset ki category"></div>
+  <div id="filters" class="filters" role="radiogroup" aria-label="Filter chunein"></div>
+  <nav class="actions">
+    <button id="retake">Dobara</button>
+    <button id="share">Share</button>
+    <button id="drive" hidden>Drive</button>
+    <button id="save" class="primary">Save</button>
+  </nav>
+</section>
+
+<div id="busy" hidden><div class="spin"></div><p id="busyTxt">Photo HD ban rahi hai…</p></div>
+<div id="toast" role="status" hidden></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const video = $('#video');
+let stream = null, facing = 'environment', pos = null, addr = null, geoAt = null;
+let outName = '', base = null, prev = null, snapNow = null, filterId = null, finalCache = null;
+const IS_GAS = typeof google !== 'undefined' && google.script && google.script.run;
+
+/* ---------- Local storage ---------- */
+const store = {
+  get(k, d){ try{ const v = localStorage.getItem('geocam.' + k); return v == null ? d : JSON.parse(v); }catch(e){ return d; } },
+  set(k, v){ try{ localStorage.setItem('geocam.' + k, JSON.stringify(v)); }catch(e){} }
+};
+
+function toast(t, ms = 3200){
+  const el = $('#toast'); el.textContent = t; el.hidden = false;
+  clearTimeout(toast.t); toast.t = setTimeout(() => el.hidden = true, ms);
+}
+function camMsg(t){ const el = $('#camMsg'); el.textContent = t || ''; el.hidden = !t; }
+
+/* ---------- Offline install ---------- */
+/* Auto update: naya version GitHub par aate hi app khud update ho jaata hai */
+let updatePending = false;
+if (!IS_GAS && 'serviceWorker' in navigator){
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.register('sw.js').then(reg => {
+    const check = () => { if (navigator.onLine) reg.update().catch(() => {}); };
+    addEventListener('online', check);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) check(); });
+    setInterval(check, 30 * 60 * 1000);
+  }).catch(() => {});
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || updatePending) return;
+    updatePending = true;
+    // photo dekhte waqt reload na ho; camera screen par ho to turant update
+    if ($('#review').hidden && $('#busy').hidden) location.reload();
+    else toast('App ka naya version aa gaya. "Dobara" dabane par update ho jaayega.', 5000);
+  });
+}
+
+function setNet(){
+  const on = navigator.onLine;
+  $('#offBar').hidden = on;
+  if (on) maybeGeocode();
+  renderLive();
+}
+addEventListener('online', setNet); addEventListener('offline', setNet);
+
+/* ---------- Camera ---------- */
+async function startCam(){
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  stream = null;
+  if (!window.isSecureContext || !navigator.mediaDevices){
+    camMsg('Camera sirf https link par chalta hai. App ko GitHub Pages wale link se kholein.'); return;
+  }
+  try{
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio:false, video:{ facingMode:{ ideal:facing }, width:{ ideal:4096 }, height:{ ideal:3072 } }
+    });
+    video.srcObject = stream;
+    video.classList.toggle('mirror', facing === 'user');
+    camMsg('');
+  }catch(e){
+    camMsg('Camera nahi khula. Browser settings mein is site ke liye Camera "Allow" karein, phir page reload karein.');
+  }
+}
+
+/* ---------- GPS ---------- */
+function setChip(state, text){ $('#gps').dataset.state = state; $('#gpsTxt').textContent = text; }
+let gpsWatch = null;
+function gotPos(p){
+  // pehle aayi kam-sahi location ko baad wali zyada-sahi location badal deti hai
+  if (pos && p.coords.accuracy > pos.coords.accuracy * 1.5 && (p.timestamp - pos.timestamp) < 60000) return;
+  pos = p;
+  const acc = Math.round(p.coords.accuracy);
+  setChip(acc <= 30 ? 'ok' : 'weak', `GPS ±${acc} m`);
+  renderLive(); maybeGeocode();
+}
+function gpsErr(e){
+  if (pos) return;
+  if (e.code === 1){
+    setChip('off', 'Location band hai: yahan dabayein');
+    $('#liveAddr').textContent = 'Location ki permission nahi mili. Phone ki Location ON karein aur browser mein is site ko Location "Allow" karein, phir upar laal button dabayein.';
+  } else {
+    setChip('weak', 'GPS dhoondh raha hai…');
+    $('#liveAddr').textContent = 'GPS dhoondh raha hai… Khuli jagah ya khidki ke paas jaayein.';
+  }
+}
+function startGPS(){
+  if (!navigator.geolocation){ setChip('off', 'Is browser mein GPS nahi hai'); return; }
+  if (gpsWatch != null) navigator.geolocation.clearWatch(gpsWatch);
+  setChip('wait', 'GPS dhoondh raha hai…');
+  // 1) jaldi wali location (network/WiFi se), 2) phir lagataar sahi GPS
+  navigator.geolocation.getCurrentPosition(gotPos, () => {}, { enableHighAccuracy:false, maximumAge:60000, timeout:15000 });
+  gpsWatch = navigator.geolocation.watchPosition(gotPos, e => {
+    gpsErr(e);
+    if (e.code === 3) setTimeout(startGPS, 2000);   // timeout par dobara koshish
+  }, { enableHighAccuracy:true, maximumAge:0, timeout:60000 });
+}
+$('#gps').addEventListener('click', () => { if (!pos) startGPS(); });
+
+function distM(a, b){
+  const R = 6371000, r = Math.PI/180;
+  const dLa = (b[0]-a[0])*r, dLo = (b[1]-a[1])*r;
+  const h = Math.sin(dLa/2)**2 + Math.cos(a[0]*r)*Math.cos(b[0]*r)*Math.sin(dLo/2)**2;
+  return 2*R*Math.asin(Math.sqrt(h));
+}
+
+/* Online address (jab net ho) — cache bhi hota hai, baad mein offline kaam aaye */
+async function maybeGeocode(){
+  if (!pos || !navigator.onLine || maybeGeocode.busy) return;
+  const la = pos.coords.latitude, lo = pos.coords.longitude;
+  if (geoAt && distM(geoAt, [la, lo]) < 150) return;
+  maybeGeocode.busy = true;
+  try{
+    const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${la}&lon=${lo}&zoom=16&addressdetails=1&accept-language=en`);
+    const a = (await r.json()).address || {};
+    addr = {
+      place: a.village || a.town || a.city || a.suburb || a.hamlet || '',
+      district: (a.state_district || a.county || '').replace(/ District$/,''),
+      state: a.state || '', pin: a.postcode || '', country: a.country || 'India'
+    };
+    geoAt = [la, lo];
+  }catch(e){}
+  finally{ maybeGeocode.busy = false; renderLive(); }
+}
+function plusCode(lat, lng){
+  const A = '23456789CFGHJMPQRVWX';
+  lat = Math.min(90, Math.max(-90, lat)); if (lat === 90) lat -= 1e-9;
+  lng = ((lng + 180) % 360 + 360) % 360 - 180;
+  let la = Math.floor(Math.round((lat + 90) * 2.5e7 * 1e6) / 1e6);
+  let lo = Math.floor(Math.round((lng + 180) * 8192000 * 1e6) / 1e6);
+  let code = '';
+  for (let i = 0; i < 5; i++){ code = A[(la % 5) * 4 + (lo % 4)] + code; la = Math.floor(la / 5); lo = Math.floor(lo / 4); }
+  for (let i = 0; i < 5; i++){ code = A[lo % 20] + code; code = A[la % 20] + code; la = Math.floor(la / 20); lo = Math.floor(lo / 20); }
+  code = code.slice(0, 8) + '+' + code.slice(8);
+  return code.slice(0, 12);
+}
+
+/* ---------- Address: sirf internet se, manual nahi ---------- */
+function addressLine(la, lo){
+  if (!navigator.onLine || !addr || !geoAt || distM(geoAt, [la, lo]) > 300) return null;
+  const parts = [];
+  const add = v => { v = String(v || '').trim(); if (v && !parts.includes(v)) parts.push(v); };
+  add(plusCode(la, lo).slice(4)); add(addr.place); add(addr.district);
+  add([addr.state, addr.pin].filter(Boolean).join(' ')); add(addr.country);
+  return parts.join(', ');
+}
+
+function renderLive(){
+  if (!pos){ $('#liveAddr').textContent = 'GPS location ka intezaar…'; $('#liveCo').textContent = ''; return; }
+  const c = pos.coords;
+  $('#liveAddr').textContent = addressLine(c.latitude, c.longitude) ||
+    (navigator.onLine ? 'Address dhoondh rahe hain…' : 'Offline: address nahi aayega');
+  $('#liveCo').textContent = `Lat ${c.latitude.toFixed(7)}°  Long ${c.longitude.toFixed(7)}°`;
+}
+
+/* ---------- Time ---------- */
+function fmt(d){
+  const p = n => String(n).padStart(2,'0');
+  const t = (h,m,s) => `${p((h+11)%12+1)}:${p(m)}:${p(s)} ${h < 12 ? 'AM' : 'PM'}`;
+  const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  return {
+    local: t(d.getHours(), d.getMinutes(), d.getSeconds()),
+    gmt: t(d.getUTCHours(), d.getUTCMinutes(), d.getUTCSeconds()),
+    date: `${days[d.getDay()]}, ${p(d.getDate())}.${p(d.getMonth()+1)}.${d.getFullYear()}`,
+    file: `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
+  };
+}
+
+/* ---------- Filters (presets) ---------- */
+const CATS = [
+  { id:'natural', name:'Natural' },
+  { id:'nature',  name:'Prakriti' },
+  { id:'food',    name:'Khana' },
+  { id:'doc',     name:'Register / Kagaz' },
+  { id:'style',   name:'Style' }
+];
+const FILTERS = [
+  // Natural
+  { id:'original', cat:'natural', name:'Original',   p:null },
+  { id:'hd',       cat:'natural', name:'HD Natural', p:{ wb:1, hl:.28, sh:.12, con:.15, sat:1.12, sharp:.55 } },
+  { id:'bright',   cat:'natural', name:'Chamkila',   p:{ wb:1, hl:.30, sh:.25, exp:1.12, con:.12, sat:1.10, sharp:.50 } },
+  { id:'indoor',   cat:'natural', name:'Andar ki roshni', p:{ wb:1, warm:-.09, hl:.30, sh:.20, exp:1.06, con:.12, sat:1.05, sharp:.50 } },
+  { id:'soft',     cat:'natural', name:'Soft',       p:{ wb:1, hl:.35, sh:.18, exp:1.05, con:.05, sat:1.05, warm:.04, sharp:-.45 } },
+  // Prakriti
+  { id:'hariyali', cat:'nature',  name:'Hariyali',   p:{ wb:.3, hl:.40, con:.30, dark:.30, sat:1.15, green:1, sharp:.60, vig:.35 } },
+  { id:'aasmaan',  cat:'nature',  name:'Aasmaan',    p:{ wb:.5, hl:.35, con:.20, sat:1.10, sky:1, green:.4, sharp:.55 } },
+  { id:'sunehra',  cat:'nature',  name:'Sunehra',    p:{ hl:.30, sh:.10, con:.18, sat:1.15, warm:.10, split:{ sh:[60,40,90], hi:[255,190,90], amt:.12 }, vig:.20, sharp:.45 } },
+  { id:'mitti',    cat:'nature',  name:'Mitti',      p:{ con:.20, sat:.85, warm:.07, lift:12, split:{ sh:[50,60,50], hi:[230,190,140], amt:.10 }, sharp:.50 } },
+  // Khana
+  { id:'swad',     cat:'food',    name:'Swad',       p:{ wb:.6, hl:.30, sh:.15, exp:1.05, con:.22, sat:1.20, food:1, warm:.03, sharp:.65, vig:.15 } },
+  { id:'taaza',    cat:'food',    name:'Taaza',      p:{ wb:1, exp:1.10, hl:.35, sh:.20, con:.15, sat:1.18, food:.6, green:.5, sharp:.60 } },
+  // Register / Kagaz
+  { id:'register', cat:'doc',     name:'Register',   p:{ wb:1, bp:35, wp:205, con:.25, sat:.70, sharp:.85 } },
+  { id:'docbw',    cat:'doc',     name:'Kagaz B&W',  p:{ gray:1, bp:50, wp:190, con:.40, sharp:.90 } },
+  // Style
+  { id:'vivid',    cat:'style',   name:'Rangeen',    p:{ wb:1, hl:.25, sh:.10, con:.30, sat:1.35, sharp:.60 } },
+  { id:'warm',     cat:'style',   name:'Garam',      p:{ wb:.5, hl:.28, sh:.12, con:.15, sat:1.12, warm:.08, sharp:.50 } },
+  { id:'cool',     cat:'style',   name:'Thanda',     p:{ wb:.5, hl:.28, sh:.12, con:.15, sat:1.08, warm:-.07, sharp:.50 } },
+  { id:'cinema',   cat:'style',   name:'Cinema',     p:{ hl:.30, con:.28, sat:1.05, split:{ sh:[0,90,110], hi:[255,170,90], amt:.16 }, vig:.30, sharp:.50 } },
+  { id:'vintage',  cat:'style',   name:'Purani yaad',p:{ con:.10, sat:.75, warm:.08, lift:28, split:{ sh:[40,60,80], hi:[255,220,170], amt:.10 }, vig:.25 } },
+  { id:'bw',       cat:'style',   name:'B&W',        p:{ hl:.20, sh:.10, con:.30, gray:1, sharp:.60 } }
+];
+
+function copyCanvas(src, W, H){
+  const c = document.createElement('canvas');
+  c.width = W || src.width; c.height = H || src.height;
+  const x = c.getContext('2d', { willReadFrequently:true });
+  x.imageSmoothingEnabled = true; x.imageSmoothingQuality = 'high';
+  x.drawImage(src, 0, 0, c.width, c.height);
+  return c;
+}
+function scaledCopy(src, maxSide){
+  const s = Math.min(1, maxSide / Math.max(src.width, src.height));
+  return copyCanvas(src, Math.round(src.width * s), Math.round(src.height * s));
+}
+
+function applyFilter(src, p){
+  const c = copyCanvas(src);
+  if (!p) return c;
+  const x = c.getContext('2d', { willReadFrequently:true });
+  const W = c.width, H = c.height;
+  const img = x.getImageData(0, 0, W, H), d = img.data;
+
+  let gr = 1, gg = 1, gb = 1;
+  if (p.wb){
+    let sr = 0, sg = 0, sb = 0, n = 0;
+    for (let i = 0; i < d.length; i += 64){ sr += d[i]; sg += d[i+1]; sb += d[i+2]; n++; }
+    sr /= n; sg /= n; sb /= n; const m = (sr + sg + sb) / 3;
+    const gain = v => Math.min(1.15, Math.max(0.88, 0.65 + 0.35 * m / Math.max(v, 1)));
+    gr = 1 + p.wb * (gain(sr) - 1); gg = 1 + p.wb * (gain(sg) - 1); gb = 1 + p.wb * (gain(sb) - 1);
+  }
+  const ex = p.exp || 1, wm = p.warm || 0;
+  gr *= ex * (1 + wm); gg *= ex; gb *= ex * (1 - wm);
+
+  const hl = p.hl || 0, sh = p.sh || 0, con = p.con || 0, sat = p.sat || 1;
+  const lut = new Float32Array(256);
+  const bp = p.bp || 0, wp = p.wp || 255, lift = p.lift || 0;
+  for (let y = 0; y < 256; y++){
+    let v = Math.min(255, Math.max(0, (y - bp) * 255 / (wp - bp)));
+    if (v > 175) v = 175 + (v - 175) * (1 - hl);
+    if (v < 60)  v = v + (60 - v) * sh;
+    let t = v / 255;
+    if (p.dark) t = Math.pow(t, 1 + p.dark);
+    const s = t < .5 ? 2*t*t : 1 - 2*(1-t)*(1-t);
+    const o = (t * (1 - con) + s * con) * 255;
+    lut[y] = lift + o * (1 - lift / 255);
+  }
+  for (let i = 0; i < d.length; i += 4){
+    let r = d[i]*gr, g = d[i+1]*gg, b = d[i+2]*gb;
+    const Y = 0.299*r + 0.587*g + 0.114*b;
+    const Yn = lut[Y > 255 ? 255 : Y | 0];
+    if (p.gray){ d[i] = d[i+1] = d[i+2] = Yn; continue; }
+    const k = Y > 0.5 ? Yn / Y : 1;
+    r *= k; g *= k; b *= k;
+    r = Yn + (r - Yn) * sat; g = Yn + (g - Yn) * sat; b = Yn + (b - Yn) * sat;
+    if (p.green){
+      const gn = g - Math.max(r, b);
+      if (gn > 0){
+        const w = Math.min(1, gn / 40) * p.green;
+        r *= 1 - 0.45 * w;            // peela-pan hatao
+        b += (g - b) * 0.18 * w;      // halka emerald / teal
+        g *= 1 + 0.10 * w;            // patti ka hara gehra aur saaf
+      }
+    }
+    if (p.sky){
+      const bn = b - Math.max(r, g);
+      if (bn > 0){ const w = Math.min(1, bn / 40) * p.sky; b *= 1 + 0.12 * w; r *= 1 - 0.25 * w; g *= 1 - 0.05 * w; }
+    }
+    if (p.food && r > g && r > b){
+      const w = Math.min(1, (r - b) / 80) * p.food;
+      r *= 1 + 0.07 * w; g *= 1 + 0.02 * w; b *= 1 - 0.10 * w;
+    }
+    if (p.split){
+      const t = Yn / 255, ws = (1 - t) * (1 - t) * p.split.amt, wh = t * t * p.split.amt;
+      const S = p.split.sh, Hh = p.split.hi;
+      r += (S[0] - r) * ws + (Hh[0] - r) * wh;
+      g += (S[1] - g) * ws + (Hh[1] - g) * wh;
+      b += (S[2] - b) * ws + (Hh[2] - b) * wh;
+    }
+    d[i] = r; d[i+1] = g; d[i+2] = b;
+  }
+  x.putImageData(img, 0, 0);
+
+  if (p.sharp){
+    const bc = document.createElement('canvas'); bc.width = W; bc.height = H;
+    const bx = bc.getContext('2d', { willReadFrequently:true });
+    if ('filter' in bx){
+      const rad = Math.max(0.6, W / 1600) * (p.sharp < 0 ? 2.5 : 1);
+      bx.filter = `blur(${rad.toFixed(2)}px)`; bx.drawImage(c, 0, 0); bx.filter = 'none';
+      const bd = bx.getImageData(0, 0, W, H).data, a = p.sharp;
+      for (let i = 0; i < d.length; i += 4){
+        d[i] += a * (d[i] - bd[i]); d[i+1] += a * (d[i+1] - bd[i+1]); d[i+2] += a * (d[i+2] - bd[i+2]);
+      }
+      x.putImageData(img, 0, 0);
+    }
+  }
+  if (p.vig){
+    const gr2 = x.createRadialGradient(W/2, H/2, Math.min(W, H) * 0.35, W/2, H/2, Math.hypot(W, H) / 2);
+    gr2.addColorStop(0, 'rgba(0,0,0,0)'); gr2.addColorStop(1, `rgba(0,0,0,${p.vig})`);
+    x.fillStyle = gr2; x.fillRect(0, 0, W, H);
+  }
+  return c;
+}
+
+/* ---------- GPS stamp ---------- */
+function wrap(ctx, text, max){
+  const words = text.split(' '), lines = []; let line = '';
+  for (const w of words){
+    const test = line ? line + ' ' + w : w;
+    if (ctx.measureText(test).width > max && line){ lines.push(line); line = w; } else line = test;
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+function stamp(c, snap){
+  const W = c.width, H = c.height, f = W / 1600;
+  const t = fmt(snap.time), co = snap.pos ? snap.pos.coords : null;
+  const addrText = snap.addr || (snap.online ? 'Address nahi mila' : 'OFFLINE: Address uplabdh nahi');
+  const fam = 'Mukta, "Noto Sans Devanagari", sans-serif';
+  const addrFont = `600 ${Math.round(44*f)}px ${fam}`;
+  const m = document.createElement('canvas').getContext('2d'); m.font = addrFont;
+  const lines = wrap(m, snap.addr ? snap.addr + ' 🇮🇳' : addrText, W - 140*f), lineH = 58*f;
+  const bandH = Math.round(50*f + lines.length*lineH + 30*f + 130*f + 60*f + 60*f + 40*f);
+  const out = document.createElement('canvas'); out.width = W; out.height = H + bandH;
+  const x = out.getContext('2d');
+  x.drawImage(c, 0, 0);
+  x.fillStyle = '#1d2420'; x.fillRect(0, H, W, bandH);
+  x.textBaseline = 'top';
+  x.font = `700 ${Math.round(26*f)}px ${fam}`; x.fillStyle = '#e8a93a'; x.textAlign = 'right';
+  x.fillText('GeoCam HD', W - 30*f, H + 14*f);
+  let y = H + 50*f;
+  x.font = addrFont; x.fillStyle = snap.addr ? '#ffffff' : '#ff8a75'; x.textAlign = 'center';
+  for (const l of lines){ x.fillText(l, W/2, y); y += lineH; }
+  y += 30*f;
+  const L = 60*f, R = W * 0.53;
+  x.textAlign = 'left';
+  x.font = `400 ${Math.round(38*f)}px ${fam}`; x.fillStyle = '#c9d1ca';
+  x.fillText('Latitude', L, y); x.fillText('Longitude', R, y);
+  y += 50*f;
+  x.font = `600 ${Math.round(52*f)}px ${fam}`; x.fillStyle = '#ffffff';
+  if (co){ x.fillText(co.latitude.toFixed(7) + '°', L, y); x.fillText(co.longitude.toFixed(7) + '°', R, y); }
+  else { x.fillStyle = '#ff8a75'; x.fillText('GPS nahi mila', L, y); x.fillText('GPS nahi mila', R, y); x.fillStyle = '#ffffff'; }
+  y += 80*f;
+  x.font = `400 ${Math.round(40*f)}px ${fam}`;
+  const alt = !co ? 'Altitude –' : co.altitude != null ? `Altitude ${Math.round(co.altitude)} meters` : `Accuracy ±${Math.round(co.accuracy)} m`;
+  x.fillText(`Local ${t.local}`, L, y); x.fillText(alt, R, y);
+  y += 60*f;
+  x.fillText(`GMT ${t.gmt}`, L, y); x.fillText(t.date, R, y);
+  return out;
+}
+
+/* ---------- Capture ---------- */
+function busy(t){ $('#busyTxt').textContent = t || ''; $('#busy').hidden = !t; }
+
+async function capture(){
+  if (!stream) return toast('Pehle camera chalu karein');
+  busy('Photo HD ban rahi hai…');
+  // online ho aur address abhi aa raha ho to thoda (max 4 sec) rukein
+  if (pos && navigator.onLine && !addressLine(pos.coords.latitude, pos.coords.longitude)){
+    maybeGeocode();
+    for (let i = 0; i < 20 && !addressLine(pos.coords.latitude, pos.coords.longitude); i++) await new Promise(r => setTimeout(r, 200));
+  }
+  snapNow = {
+    pos, online: navigator.onLine, time: new Date(),
+    addr: pos ? addressLine(pos.coords.latitude, pos.coords.longitude) : null
+  };
+  if (!pos) toast('GPS nahi mila: photo par location nahi aayegi', 4000);
+  await new Promise(r => setTimeout(r, 40));
+  try{
+    try{ await document.fonts.load('600 40px Mukta'); }catch(e){}
+    let src = null, sw = 0, sh = 0;
+    try{
+      if ('ImageCapture' in window){
+        const blob = await new ImageCapture(stream.getVideoTracks()[0]).takePhoto();
+        src = await createImageBitmap(blob); sw = src.width; sh = src.height;
+      }
+    }catch(e){ src = null; }
+    if (!src){ src = video; sw = video.videoWidth; sh = video.videoHeight; }
+    const long = Math.max(sw, sh); let s = 1;
+    if (long < 3000) s = Math.min(2, 3600 / long);
+    if (long * s > 4000) s = 4000 / long;
+    base = copyCanvas(src, Math.round(sw * s), Math.round(sh * s));
+    prev = scaledCopy(base, 1100);
+    outName = `GeoCam_${fmt(snapNow.time).file}.jpg`;
+    thumbCache = {}; smallPrev = null;
+    const saved = FILTERS.find(q => q.id === store.get('filter', 'hd')) || FILTERS[1];
+    filterId = saved.id; catId = saved.cat;
+    renderCats(); renderThumbs();
+    showFilter(saved.id);
+    $('#review').hidden = false;
+  }catch(e){
+    toast('Photo process nahi hui. Dobara koshish karein.');
+  }finally{ busy(''); }
+}
+
+let catId = 'natural', thumbCache = {}, smallPrev = null;
+
+function renderCats(){
+  const box = $('#cats'); box.innerHTML = '';
+  for (const c of CATS){
+    const b = document.createElement('button');
+    b.className = 'cat'; b.setAttribute('role', 'tab'); b.textContent = c.name;
+    b.setAttribute('aria-selected', c.id === catId);
+    b.onclick = () => { catId = c.id; renderCats(); renderThumbs(); };
+    box.appendChild(b);
+  }
+}
+
+function renderThumbs(){
+  const box = $('#filters'); box.innerHTML = '';
+  if (!smallPrev) smallPrev = scaledCopy(prev, 150);
+  for (const f of FILTERS.filter(q => q.cat === catId)){
+    const b = document.createElement('button');
+    b.className = 'fbtn'; b.setAttribute('role', 'radio'); b.dataset.id = f.id;
+    b.setAttribute('aria-checked', f.id === filterId);
+    const im = document.createElement('img'); im.alt = '';
+    im.src = thumbCache[f.id] || (thumbCache[f.id] = applyFilter(smallPrev, f.p).toDataURL('image/jpeg', .8));
+    const span = document.createElement('span'); span.textContent = f.name;
+    b.append(im, span);
+    b.onclick = () => showFilter(f.id);
+    box.appendChild(b);
+  }
+}
+
+function showFilter(id){
+  const f = FILTERS.find(q => q.id === id) || FILTERS[1];
+  filterId = f.id; finalCache = null; store.set('filter', f.id);
+  for (const b of document.querySelectorAll('.fbtn')) b.setAttribute('aria-checked', b.dataset.id === f.id);
+  const out = stamp(applyFilter(prev, f.p), snapNow);
+  $('#shot').src = out.toDataURL('image/jpeg', .88);
+  $('#shotMeta').textContent = `${f.name} · ${base.width} × ${base.height} px`;
+}
+
+async function finalBlob(){
+  if (finalCache && finalCache.id === filterId) return finalCache.blob;
+  busy('Photo taiyaar ho rahi hai…');
+  await new Promise(r => setTimeout(r, 40));
+  try{
+    const f = FILTERS.find(q => q.id === filterId);
+    const out = stamp(applyFilter(base, f.p), snapNow);
+    const blob = await new Promise(r => out.toBlob(r, 'image/jpeg', 0.95));
+    finalCache = { id: filterId, blob };
+    return blob;
+  }finally{ busy(''); }
+}
+
+/* ---------- Buttons ---------- */
+$('#shutter').onclick = capture;
+$('#flip').onclick = () => { facing = facing === 'user' ? 'environment' : 'user'; startCam(); };
+$('#retake').onclick = () => { if (updatePending) return location.reload(); $('#review').hidden = true; };
+$('#save').onclick = async () => {
+  const blob = await finalBlob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = outName;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  toast('Photo save ho gayi (Downloads folder)');
+};
+$('#share').onclick = async () => {
+  const blob = await finalBlob();
+  const file = new File([blob], outName, { type:'image/jpeg' });
+  if (navigator.canShare && navigator.canShare({ files:[file] })){
+    try{ await navigator.share({ files:[file] }); }catch(e){}
+  } else toast('Is phone par share nahi chalega. Save karke WhatsApp par bhejein.');
+};
+if (IS_GAS){
+  $('#drive').hidden = false;
+  $('#drive').onclick = async () => {
+    const blob = await finalBlob();
+    const dataUrl = await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(blob); });
+    busy('Drive mein save ho rahi hai…');
+    google.script.run
+      .withSuccessHandler(() => { busy(''); toast('Drive ke "GeoCam Photos" folder mein save ho gayi'); })
+      .withFailureHandler(e => { busy(''); toast('Drive mein save nahi hui: ' + (e && e.message || 'net check karein')); })
+      .savePhoto(dataUrl, outName);
+  };
+}
+
+setNet();
+startCam();
+startGPS();
+</script>
+</body>
+</html>
