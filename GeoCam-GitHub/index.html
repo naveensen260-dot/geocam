@@ -57,8 +57,9 @@ video{width:100%;height:100%;object-fit:cover;background:#000}
   background:var(--band);text-align:center;font-size:16px;line-height:1.45}
 
 .screen{position:fixed;inset:0;background:var(--ink);display:flex;flex-direction:column;padding-top:var(--safe-t)}
-.shotWrap{flex:1;min-height:0;display:grid;place-items:center;padding:12px}
-#shot{max-width:100%;max-height:100%;object-fit:contain;border-radius:4px}
+.shotWrap{flex:1;min-height:0;position:relative}
+#shot{position:absolute;left:12px;top:12px;width:calc(100% - 24px);height:calc(100% - 12px);object-fit:contain}
+.filters,.cats,.actions,.meta{flex:0 0 auto}
 .actions{display:flex;gap:10px;padding:12px 14px calc(var(--safe-b) + 16px)}
 .actions button{flex:1;height:50px;border-radius:10px;background:var(--band);font-weight:600;font-size:16px}
 .primary{background:var(--haldi)!important;color:var(--ink);font-weight:700!important}
@@ -76,6 +77,24 @@ video{width:100%;height:100%;object-fit:cover;background:#000}
 .fbtn[aria-checked="true"] img{border-color:var(--haldi)}
 
 
+.perm{position:fixed;inset:0;z-index:6;background:var(--ink);display:grid;place-items:center;
+  padding:calc(var(--safe-t) + 20px) 20px calc(var(--safe-b) + 20px);overflow-y:auto}
+.permBox{width:100%;max-width:420px}
+.perm h1{margin:0 0 6px;font-size:28px}
+.perm p{margin:0 0 20px;color:var(--muted);font-size:16px;line-height:1.5}
+.prow{display:flex;align-items:center;gap:12px;padding:14px;margin-bottom:10px;border-radius:12px;background:var(--band)}
+.prow div{flex:1}
+.prow b{display:block;font-size:17px}
+.prow small{color:var(--muted);font-size:14px}
+.pdot{width:12px;height:12px;border-radius:50%;background:var(--haldi)}
+.prow .st{font-size:14px;font-weight:600;color:var(--haldi)}
+.prow[data-st="granted"] .pdot{background:#5fd18f}
+.prow[data-st="granted"] .st{color:#5fd18f}
+.prow[data-st="denied"] .pdot{background:var(--danger)}
+.prow[data-st="denied"] .st{color:var(--danger)}
+.permBtn{width:100%;height:54px;margin-top:10px;border-radius:12px;background:var(--haldi);color:var(--ink);font-size:18px;font-weight:700}
+.permBtn:disabled{opacity:.6}
+.permHelp{margin-top:16px!important;padding:14px;border-radius:12px;background:#3a1f1a;color:#ffd9d0!important;font-size:15px!important;white-space:pre-line}
 #busy{position:fixed;inset:0;background:rgba(18,26,22,.9);display:grid;place-content:center;justify-items:center;gap:14px;font-size:17px;z-index:4}
 .spin{width:44px;height:44px;border-radius:50%;border:4px solid rgba(255,255,255,.2);border-top-color:var(--haldi);animation:spin .8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
@@ -123,6 +142,17 @@ video{width:100%;height:100%;object-fit:cover;background:#000}
     <button id="drive" hidden>Drive</button>
     <button id="save" class="primary">Save</button>
   </nav>
+</section>
+
+<section id="perm" class="perm" hidden>
+  <div class="permBox">
+    <h1>GeoCam HD</h1>
+    <p>Photo par sahi location aur time lagane ke liye app ko 2 ijaazat chahiye.</p>
+    <div id="pCam" class="prow" data-st="prompt"><span class="pdot"></span><div><b>Camera</b><small>Photo khinchne ke liye</small></div><span class="st">Baaki</span></div>
+    <div id="pLoc" class="prow" data-st="prompt"><span class="pdot"></span><div><b>Location (GPS)</b><small>Photo par Lat/Long aur address ke liye</small></div><span class="st">Baaki</span></div>
+    <button id="permBtn" class="permBtn">Ijaazat dein</button>
+    <p id="permHelp" class="permHelp" hidden></p>
+  </div>
 </section>
 
 <div id="busy" hidden><div class="spin"></div><p id="busyTxt">Photo HD ban rahi hai…</p></div>
@@ -607,9 +637,65 @@ if (IS_GAS){
   };
 }
 
+/* ---------- App khulte hi ijaazat ---------- */
+async function permState(name){
+  try{ return (await navigator.permissions.query({ name })).state; }catch(e){ return 'prompt'; }
+}
+function setRow(sel, st){
+  const el = $(sel); el.dataset.st = st;
+  el.querySelector('.st').textContent = st === 'granted' ? 'Mil gayi ✓' : st === 'denied' ? 'Band hai' : 'Baaki';
+}
+async function refreshPerm(){
+  const cam = stream ? 'granted' : await permState('camera');
+  const loc = pos ? 'granted' : await permState('geolocation');
+  setRow('#pCam', cam); setRow('#pLoc', loc);
+  return { cam, loc };
+}
+function permHelp(t){ $('#permHelp').textContent = t || ''; $('#permHelp').hidden = !t; }
+const DENIED_HELP = 'Ijaazat band ho gayi hai. Ise chalu karne ke liye:\n1. Chrome kholein → ⋮ → Settings → Site settings\n2. "Camera" aur "Location" mein naveensen260-dot.github.io chunein → Allow\n3. Phone ki Settings → Apps → Chrome → Permissions mein Camera aur Location "Allow" karein\n4. GeoCam app band karke dobara kholein';
+
+async function askPermissions(){
+  $('#permBtn').disabled = true; permHelp('');
+  await startCam();
+  let gpsOff = false;
+  await new Promise(res => navigator.geolocation
+    ? navigator.geolocation.getCurrentPosition(p => { gotPos(p); res(); },
+        e => { if (e.code === 2 || e.code === 3) gpsOff = true; res(); },
+        { enableHighAccuracy:false, maximumAge:60000, timeout:15000 })
+    : res());
+  startGPS();
+  const st = await refreshPerm();
+  $('#permBtn').disabled = false;
+  if (st.cam === 'granted' && st.loc === 'granted'){
+    $('#perm').hidden = true;
+    if (gpsOff && !pos) toast('Phone ki Location (GPS) ON karein', 5000);
+  } else if (st.cam === 'denied' || st.loc === 'denied'){
+    permHelp(DENIED_HELP);
+  } else if (gpsOff){
+    permHelp('Phone ki Location (GPS) band hai. Upar se notification patti kheench kar "Location" ON karein, phir dobara "Ijaazat dein" dabayein.');
+  }
+}
+
+async function initPerms(){
+  const st = await refreshPerm();
+  if (st.cam === 'granted' && st.loc === 'granted'){ startCam(); startGPS(); return; }
+  $('#perm').hidden = false;
+  if (st.cam === 'denied' || st.loc === 'denied') permHelp(DENIED_HELP);
+  else askPermissions();   // khulte hi ijaazat ka popup
+  // settings se ijaazat dene par screen apne aap hat jaaye
+  for (const n of ['camera', 'geolocation']){
+    try{
+      (await navigator.permissions.query({ name:n })).onchange = async () => {
+        const s2 = await refreshPerm();
+        if (s2.cam === 'granted' && s2.loc === 'granted'){ if (!stream) await startCam(); startGPS(); $('#perm').hidden = true; }
+      };
+    }catch(e){}
+  }
+}
+$('#permBtn').onclick = askPermissions;
+
 setNet();
-startCam();
-startGPS();
+initPerms();
 </script>
 </body>
 </html>
