@@ -388,7 +388,6 @@ const CATS = [
   { id:'natural', name:'Natural' },
   { id:'nature',  name:'Nature' },
   { id:'food',    name:'Food' },
-  { id:'doc',     name:'Documents' },
   { id:'style',   name:'Style' }
 ];
 const AQUATIC = { exp:1.08, hl:.22, sh:.16, con:.18, sat:1.05, sharp:.6,
@@ -414,15 +413,12 @@ const FILTERS = [
   // Khana
   { id:'swad',     cat:'food',    name:'Tasty',       p:{ wb:.6, hl:.30, sh:.15, exp:1.05, con:.22, sat:1.20, food:1, warm:.03, sharp:.65, vig:.15 } },
   { id:'taaza',    cat:'food',    name:'Fresh',      p:{ wb:1, exp:1.10, hl:.35, sh:.20, con:.15, sat:1.18, food:.6, green:.5, sharp:.60 } },
-  // Register / Kagaz
-  { id:'register', cat:'doc',     name:'Register',   p:{ wb:1, bp:35, wp:205, con:.25, sat:.70, sharp:.85 } },
-  { id:'docbw',    cat:'doc',     name:'Doc B&W',  p:{ gray:1, bp:50, wp:190, con:.40, sharp:.90 } },
   // Style
+  { id:'aquatic',  cat:'style',   name:'Aquatic',    p:AQUATIC },
   { id:'vivid',    cat:'style',   name:'Vivid',    p:{ wb:1, hl:.25, sh:.10, con:.30, sat:1.35, sharp:.60 } },
   { id:'warm',     cat:'style',   name:'Warm',      p:{ wb:.5, hl:.28, sh:.12, con:.15, sat:1.12, warm:.08, sharp:.50 } },
   { id:'cool',     cat:'style',   name:'Cool',     p:{ wb:.5, hl:.28, sh:.12, con:.15, sat:1.08, warm:-.07, sharp:.50 } },
   { id:'cinema',   cat:'style',   name:'Cinema',     p:{ hl:.30, con:.28, sat:1.05, split:{ sh:[0,90,110], hi:[255,170,90], amt:.16 }, vig:.30, sharp:.50 } },
-  { id:'aquatic',  cat:'style',   name:'Aquatic',    p:AQUATIC },
   { id:'vintage',  cat:'style',   name:'Vintage',p:{ con:.10, sat:.75, warm:.08, lift:28, split:{ sh:[40,60,80], hi:[255,220,170], amt:.10 }, vig:.25 } },
   { id:'bw',       cat:'style',   name:'B&W',        p:{ hl:.20, sh:.10, con:.30, gray:1, sharp:.60 } }
 ];
