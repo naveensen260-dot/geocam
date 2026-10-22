@@ -225,7 +225,7 @@ if (!IS_GAS && 'serviceWorker' in navigator){
 function setNet(){
   const on = navigator.onLine;
   $('#offBar').hidden = on;
-  if (on) maybeGeocode();
+  if (on){ maybeGeocode(); prefetchMap(); }
   renderLive();
 }
 addEventListener('online', setNet); addEventListener('offline', setNet);
@@ -260,7 +260,7 @@ function gotPos(p){
   if (!$('#perm').hidden){ refreshPerm(); readyCheck(); }
   const acc = Math.round(p.coords.accuracy);
   setChip(acc <= 30 ? 'ok' : 'weak', `GPS ±${acc} m`);
-  renderLive(); maybeGeocode();
+  renderLive(); maybeGeocode(); prefetchMap();
 }
 let gpsRetry = null;
 function locBar(text){
@@ -699,40 +699,144 @@ function wrap(ctx, text, max){
   if (line) lines.push(line);
   return lines;
 }
+/* ---------- Chhota naksha (satellite map) photo ke liye ---------- */
+const MAP = { canvas:null, la:0, lo:0, busy:false };
+function tileXY(la, lo, z){
+  const n = 2 ** z, r = la * Math.PI / 180;
+  return [(lo + 180) / 360 * n, (1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * n];
+}
+function loadImg(url){
+  return new Promise(res => {
+    const im = new Image(); let done = false;
+    const fin = v => { if (!done){ done = true; res(v); } };
+    im.crossOrigin = 'anonymous'; im.onload = () => fin(im); im.onerror = () => fin(null);
+    setTimeout(() => fin(null), 8000); im.src = url;
+  });
+}
+async function prefetchMap(){
+  if (!pos || !navigator.onLine || MAP.busy) return;
+  const la = pos.coords.latitude, lo = pos.coords.longitude;
+  if (MAP.canvas && distM([MAP.la, MAP.lo], [la, lo]) < 25) return;
+  MAP.busy = true;
+  try{
+    const z = 17, [tx, ty] = tileXY(la, lo, z), S = 256;
+    const x0 = tx * 256 - S / 2, y0 = ty * 256 - S / 2, tiles = [];
+    for (let i = Math.floor(x0 / 256); i <= Math.floor((x0 + S - 1) / 256); i++)
+      for (let j = Math.floor(y0 / 256); j <= Math.floor((y0 + S - 1) / 256); j++) tiles.push([i, j]);
+    const sources = [
+      (i, j) => `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${j}/${i}`,
+      (i, j) => `https://tile.openstreetmap.org/${z}/${i}/${j}.png`
+    ];
+    for (const [k, src] of sources.entries()){
+      const ims = await Promise.all(tiles.map(([i, j]) => loadImg(src(i, j))));
+      if (ims.some(im => !im)) continue;
+      const c = document.createElement('canvas'); c.width = S; c.height = S;
+      const x = c.getContext('2d');
+      tiles.forEach(([i, j], n) => x.drawImage(ims[n], i * 256 - x0, j * 256 - y0));
+      try{ x.getImageData(0, 0, 1, 1); }catch(e){ continue; }   // CORS check
+      MAP.canvas = c; MAP.la = la; MAP.lo = lo; MAP.credit = k === 0 ? '© Esri' : '© OpenStreetMap';
+      break;
+    }
+  }catch(e){}
+  finally{ MAP.busy = false; }
+}
+
+function rrect(x, X, Y, w, h, r){
+  x.beginPath(); x.moveTo(X + r, Y); x.arcTo(X + w, Y, X + w, Y + h, r); x.arcTo(X + w, Y + h, X, Y + h, r);
+  x.arcTo(X, Y + h, X, Y, r); x.arcTo(X, Y, X + w, Y, r); x.closePath();
+}
+function drawPin(x, cx, cy, s){
+  x.save(); x.translate(cx, cy);
+  x.fillStyle = 'rgba(0,0,0,.35)'; x.beginPath(); x.ellipse(0, 0, s * .45, s * .16, 0, 0, Math.PI * 2); x.fill();
+  x.fillStyle = '#e53935'; x.beginPath();
+  x.moveTo(0, 0); x.bezierCurveTo(-s * .15, -s * .45, -s * .55, -s * .6, -s * .55, -s * 1.0);
+  x.arc(0, -s * 1.0, s * .55, Math.PI, 0); x.bezierCurveTo(s * .55, -s * .6, s * .15, -s * .45, 0, 0); x.fill();
+  x.fillStyle = '#7a0f0f'; x.beginPath(); x.arc(0, -s * 1.0, s * .22, 0, Math.PI * 2); x.fill();
+  x.restore();
+}
+function drawMapBox(x, X, Y, S, snap, f, fam){
+  x.save(); rrect(x, X, Y, S, S, 18 * f); x.clip();
+  if (snap.map){
+    x.drawImage(snap.map, X, Y, S, S);
+  } else {
+    // naksha na mile (offline): saaf-suthra naksha jaisa dabba
+    x.fillStyle = '#0f3d27'; x.fillRect(X, Y, S, S);
+    x.strokeStyle = 'rgba(255,255,255,.10)'; x.lineWidth = Math.max(1, 2 * f);
+    for (let k = 1; k < 6; k++){ const t = X + S * k / 6; x.beginPath(); x.moveTo(t, Y); x.lineTo(t, Y + S); x.stroke(); const u = Y + S * k / 6; x.beginPath(); x.moveTo(X, u); x.lineTo(X + S, u); x.stroke(); }
+    x.strokeStyle = 'rgba(134,239,172,.45)'; x.lineWidth = 6 * f;
+    x.beginPath(); x.moveTo(X, Y + S * .68); x.bezierCurveTo(X + S * .35, Y + S * .5, X + S * .55, Y + S * .85, X + S, Y + S * .62); x.stroke();
+    x.fillStyle = 'rgba(255,255,255,.75)'; x.font = `600 ${Math.round(20 * f)}px ${fam}`; x.textAlign = 'center'; x.textBaseline = 'top';
+    x.fillText(snap.online ? 'Map' : 'Offline', X + S / 2, Y + S - 34 * f);
+  }
+  drawPin(x, X + S / 2, Y + S / 2 + 18 * f, 34 * f);
+  if (snap.map && snap.mapCredit){
+    x.fillStyle = 'rgba(255,255,255,.85)'; x.font = `500 ${Math.round(15 * f)}px ${fam}`; x.textAlign = 'left'; x.textBaseline = 'bottom';
+    x.fillText(snap.mapCredit, X + 8 * f, Y + S - 6 * f);
+  }
+  x.restore();
+}
+function ellipsize(x, t, max){
+  if (x.measureText(t).width <= max) return t;
+  while (t.length > 3 && x.measureText(t + '…').width > max) t = t.slice(0, -1);
+  return t + '…';
+}
+
+/* ---------- GPS stamp (photo ke andar, map ke saath) ---------- */
 function stamp(c, snap){
-  const W = c.width, H = c.height, f = W / 1600;
-  const t = fmt(snap.time), co = snap.pos ? snap.pos.coords : null;
-  const addrText = snap.addr || (snap.online ? 'Address not found' : 'OFFLINE: Address not available');
+  const W = c.width, H = c.height, f = Math.min(W, H * .8) / 1080;
+  const out = document.createElement('canvas'); out.width = W; out.height = H;
+  const x = out.getContext('2d'); x.drawImage(c, 0, 0);
   const fam = 'Mukta, "Noto Sans Devanagari", sans-serif';
-  const addrFont = `600 ${Math.round(44*f)}px ${fam}`;
-  const m = document.createElement('canvas').getContext('2d'); m.font = addrFont;
-  const lines = wrap(m, snap.addr ? snap.addr + ' 🇮🇳' : addrText, W - 140*f), lineH = 58*f;
-  const bandH = Math.round(50*f + lines.length*lineH + 30*f + 130*f + 60*f + 60*f + 40*f);
-  const out = document.createElement('canvas'); out.width = W; out.height = H + bandH;
-  const x = out.getContext('2d');
-  x.drawImage(c, 0, 0);
-  x.fillStyle = '#1d2420'; x.fillRect(0, H, W, bandH);
-  x.textBaseline = 'top';
-  x.font = `700 ${Math.round(26*f)}px ${fam}`; x.fillStyle = '#e8a93a'; x.textAlign = 'right';
-  x.fillText('GeoCam HD', W - 30*f, H + 14*f);
-  let y = H + 50*f;
-  x.font = addrFont; x.fillStyle = snap.addr ? '#ffffff' : '#ff8a75'; x.textAlign = 'center';
-  for (const l of lines){ x.fillText(l, W/2, y); y += lineH; }
-  y += 30*f;
-  const L = 60*f, R = W * 0.53;
-  x.textAlign = 'left';
-  x.font = `400 ${Math.round(38*f)}px ${fam}`; x.fillStyle = '#c9d1ca';
-  x.fillText('Latitude', L, y); x.fillText('Longitude', R, y);
-  y += 50*f;
-  x.font = `600 ${Math.round(52*f)}px ${fam}`; x.fillStyle = '#ffffff';
-  if (co){ x.fillText(co.latitude.toFixed(7) + '°', L, y); x.fillText(co.longitude.toFixed(7) + '°', R, y); }
-  else { x.fillStyle = '#ff8a75'; x.fillText('GPS not found', L, y); x.fillText('GPS not found', R, y); x.fillStyle = '#ffffff'; }
-  y += 80*f;
-  x.font = `400 ${Math.round(40*f)}px ${fam}`;
-  const alt = !co ? 'Altitude –' : co.altitude != null ? `Altitude ${Math.round(co.altitude)} meters` : `Accuracy ±${Math.round(co.accuracy)} m`;
-  x.fillText(`Local ${t.local}`, L, y); x.fillText(alt, R, y);
-  y += 60*f;
-  x.fillText(`GMT ${t.gmt}`, L, y); x.fillText(t.date, R, y);
+  const co = snap.pos ? snap.pos.coords : null, d = snap.time;
+  const p2 = n => String(n).padStart(2, '0');
+  const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const off = -d.getTimezoneOffset(), oh = Math.floor(Math.abs(off) / 60), om = Math.abs(off) % 60;
+  const hh = d.getHours();
+  const when = `${days[d.getDay()]}, ${p2(d.getDate())}/${p2(d.getMonth()+1)}/${d.getFullYear()} ${p2((hh+11)%12+1)}:${p2(d.getMinutes())}:${p2(d.getSeconds())} ${hh < 12 ? 'AM' : 'PM'} GMT ${off >= 0 ? '+' : '-'}${p2(oh)}:${p2(om)}`;
+
+  const m = 22 * f, gap = 14 * f, pad = 20 * f;
+  const title = snap.place ? snap.place + ' 🇮🇳' : (snap.online ? 'Location' : 'OFFLINE');
+  const addrText = snap.addr || (snap.online ? 'Address not found' : 'Address not available (no internet)');
+  const coord = co ? `Lat ${co.latitude.toFixed(6)}°   Long ${co.longitude.toFixed(6)}°` : 'GPS not found';
+  const extra = co ? `Altitude ${co.altitude != null ? Math.round(co.altitude) + ' m' : '–'}   •   Accuracy ±${Math.round(co.accuracy)} m` : '';
+
+  // panel ka size
+  const fT = Math.round(44 * f), fS = Math.round(28 * f), fX = Math.round(24 * f);
+  const lhT = 54 * f, lhS = 37 * f, lhX = 32 * f;
+  x.font = `500 ${fS}px ${fam}`;
+  // map ke saath panel ki chaudai
+  let ph = pad + lhT + lhS * 2 + lhS * 2 + (extra ? lhX : 0) + pad * .6;
+  let ms = Math.min(ph, W * .3);
+  const px = m + ms + gap, pw = W - px - m;
+  let lines = wrap(x, addrText, pw - pad * 2).slice(0, 2);
+  if (lines.length === 2 && wrap(x, addrText, pw - pad * 2).length > 2) lines[1] = ellipsize(x, lines[1], pw - pad * 2);
+  ph = pad + lhT + lhS * lines.length + lhS * 2 + (extra ? lhX : 0) + pad * .6;
+  ms = Math.min(ph, W * .3);
+  const py = H - m - ph;
+
+  // map
+  drawMapBox(x, m, py + ph - ms, ms, snap, f, fam);
+
+  // panel
+  rrect(x, px, py, pw, ph, 18 * f); x.fillStyle = 'rgba(0,0,0,.72)'; x.fill();
+
+  // GeoCam badge
+  x.font = `700 ${Math.round(22 * f)}px ${fam}`;
+  const bt = 'GeoCam HD', bw = x.measureText(bt).width + 54 * f, bh = 40 * f, bx = px + pw - bw, by = py - bh - 8 * f;
+  rrect(x, bx, by, bw, bh, bh / 2); x.fillStyle = 'rgba(0,0,0,.72)'; x.fill();
+  x.fillStyle = '#4ade80'; x.beginPath(); x.arc(bx + 22 * f, by + bh / 2, 8 * f, 0, Math.PI * 2); x.fill();
+  x.fillStyle = '#ffffff'; x.textAlign = 'left'; x.textBaseline = 'middle'; x.fillText(bt, bx + 38 * f, by + bh / 2 + 1 * f);
+
+  // text
+  let ty = py + pad; const tx = px + pad, tw = pw - pad * 2;
+  x.textBaseline = 'top'; x.textAlign = 'left';
+  x.font = `700 ${fT}px ${fam}`; x.fillStyle = snap.place ? '#ffffff' : (snap.online ? '#ffffff' : '#ff9a85');
+  x.fillText(ellipsize(x, title, tw), tx, ty); ty += lhT;
+  x.font = `500 ${fS}px ${fam}`; x.fillStyle = snap.addr ? '#f1f1f1' : '#ff9a85';
+  for (const l of lines){ x.fillText(l, tx, ty); ty += lhS; }
+  x.fillStyle = co ? '#f1f1f1' : '#ff9a85'; x.fillText(ellipsize(x, coord, tw), tx, ty); ty += lhS;
+  x.fillStyle = '#f1f1f1'; x.fillText(ellipsize(x, when, tw), tx, ty); ty += lhS;
+  if (extra){ x.font = `500 ${fX}px ${fam}`; x.fillStyle = '#bdbdbd'; x.fillText(ellipsize(x, extra, tw), tx, ty); }
   return out;
 }
 
@@ -749,9 +853,12 @@ async function capture(){
     maybeGeocode();
     for (let i = 0; i < 20 && !addressLine(pos.coords.latitude, pos.coords.longitude); i++) await new Promise(r => setTimeout(r, 200));
   }
+  const aLine = pos ? addressLine(pos.coords.latitude, pos.coords.longitude) : null;
   snapNow = {
-    pos, online: navigator.onLine, time: new Date(),
-    addr: pos ? addressLine(pos.coords.latitude, pos.coords.longitude) : null
+    pos, online: navigator.onLine, time: new Date(), addr: aLine,
+    place: aLine && addr ? [addr.local || addr.village || addr.town, addr.state, addr.country].filter(Boolean).join(', ') : '',
+    map: pos && MAP.canvas && distM([MAP.la, MAP.lo], [pos.coords.latitude, pos.coords.longitude]) < 80 ? MAP.canvas : null,
+    mapCredit: MAP.credit || ''
   };
   await new Promise(r => setTimeout(r, 40));
   try{
@@ -1132,4 +1239,4 @@ setNet();
 initPerms();
 </script>
 </body>
-</html>v
+</html>
