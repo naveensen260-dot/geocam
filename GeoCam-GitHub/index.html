@@ -1,10 +1,11 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" translate="no" class="notranslate">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0d1726">
 <meta name="geocam-app" content="1">
+<meta name="google" content="notranslate">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <link rel="manifest" href="manifest.json">
@@ -242,6 +243,7 @@ async function startCam(){
       audio:false, video:{ facingMode:{ ideal:facing }, width:{ ideal:4096 }, height:{ ideal:3072 } }
     });
     video.srcObject = stream;
+    if (LIVE.gl) setTimeout(liveStart, 300);
     video.classList.toggle('mirror', facing === 'user');
     $('#liveCv').classList.toggle('mirror', facing === 'user');
     camMsg('');
@@ -844,54 +846,66 @@ function stamp(c, snap){
 // busy(true) = sirf ghoomta gola, busy('text') = gola + likha, busy('') = band
 function busy(t){ $('#busyTxt').textContent = typeof t === 'string' ? t : ''; $('#busy').hidden = !t; }
 
-async function capture(){
-  if (!stream) return toast('Please start the camera first');
-  if (!pos){ startGPS(); return toast('Location is needed for the photo. Turn on phone Location (GPS) and wait for the green GPS light.', 4500); }
-  busy(true);
-  // online ho aur address abhi aa raha ho to thoda (max 4 sec) rukein
+/* Photo ke saath GPS, address aur naksha ka snapshot */
+async function takeSnap(time){
   if (pos && navigator.onLine && !addressLine(pos.coords.latitude, pos.coords.longitude)){
     maybeGeocode();
     for (let i = 0; i < 20 && !addressLine(pos.coords.latitude, pos.coords.longitude); i++) await new Promise(r => setTimeout(r, 200));
   }
   const aLine = pos ? addressLine(pos.coords.latitude, pos.coords.longitude) : null;
-  snapNow = {
-    pos, online: navigator.onLine, time: new Date(), addr: aLine,
+  return {
+    pos, online: navigator.onLine, time: time || new Date(), addr: aLine,
     place: aLine && addr ? [addr.local || addr.village || addr.town, addr.state, addr.country].filter(Boolean).join(', ') : '',
     map: pos && MAP.canvas && distM([MAP.la, MAP.lo], [pos.coords.latitude, pos.coords.longitude]) < 80 ? MAP.canvas : null,
     mapCredit: MAP.credit || ''
   };
+}
+/* Photo ko HD banakar review screen kholna (dono camera ke liye) */
+function openReview(src, sw, sh){
+  const long = Math.max(sw, sh); let s = 1;
+  if (long < 3000) s = Math.min(2, 3600 / long);   // chhoti photo ko bada
+  if (long * s > 4000) s = 4000 / long;
+  base = copyCanvas(src, Math.round(sw * s), Math.round(sh * s));
+  prev = scaledCopy(base, 1100);
+  outName = `GeoCam_${fmt(snapNow.time).file}.jpg`;
+  thumbCache = {}; smallPrev = null;
+  strength = 1; brightAdj = 0; smoothAdj = 0; vigAdj = 0;
+  $('#vig').value = 0; $('#vigVal').textContent = '0';
+  $('#smooth').value = 0; $('#smoothVal').textContent = '0';
+  $('#strength').value = 100; $('#strengthVal').textContent = '100%';
+  $('#bright').value = 0; $('#brightVal').textContent = '0';
+  const saved = FILTERS.find(q => q.id === store.get('filter', 'hd')) || FILTERS[1];
+  filterId = saved.id; catId = saved.cat;
+  renderCats(); renderThumbs();
+  showFilter(saved.id);
+  $('#review').hidden = false;
+}
+
+async function capture(){
+  if (!stream) return toast('Please start the camera first');
+  if (!pos){ startGPS(); return toast('Location is needed for the photo. Turn on phone Location (GPS) and wait for the green GPS light.', 4500); }
+  busy(true);
+  snapNow = await takeSnap(new Date());
   await new Promise(r => setTimeout(r, 40));
   try{
     try{ await document.fonts.load('600 40px Mukta'); }catch(e){}
     let src = null, sw = 0, sh = 0;
     try{
       if ('ImageCapture' in window){
-        const blob = await new ImageCapture(stream.getVideoTracks()[0]).takePhoto();
+        const ic = new ImageCapture(stream.getVideoTracks()[0]);
+        // camera se uski poori (maximum) resolution maango
+        const within = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
+        const blob = await within(ic.takePhoto(), 7000);
         src = await createImageBitmap(blob); sw = src.width; sh = src.height;
       }
     }catch(e){ src = null; }
     if (!src){ src = video; sw = video.videoWidth; sh = video.videoHeight; }
-    const long = Math.max(sw, sh); let s = 1;
-    if (long < 3000) s = Math.min(2, 3600 / long);
-    if (long * s > 4000) s = 4000 / long;
-    base = copyCanvas(src, Math.round(sw * s), Math.round(sh * s));
-    prev = scaledCopy(base, 1100);
-    outName = `GeoCam_${fmt(snapNow.time).file}.jpg`;
-    thumbCache = {}; smallPrev = null;
-    strength = 1; brightAdj = 0; smoothAdj = 0; vigAdj = 0;
-    $('#vig').value = 0; $('#vigVal').textContent = '0';
-    $('#smooth').value = 0; $('#smoothVal').textContent = '0';
-    $('#strength').value = 100; $('#strengthVal').textContent = '100%';
-    $('#bright').value = 0; $('#brightVal').textContent = '0';
-    const saved = FILTERS.find(q => q.id === store.get('filter', 'hd')) || FILTERS[1];
-    filterId = saved.id; catId = saved.cat;
-    renderCats(); renderThumbs();
-    showFilter(saved.id);
-    $('#review').hidden = false;
+    openReview(src, sw, sh);
   }catch(e){
     toast('Could not process the photo. Please try again.');
   }finally{ busy(''); }
 }
+
 
 let catId = 'natural', thumbCache = {}, smallPrev = null;
 
@@ -1086,8 +1100,14 @@ function liveSetFilter(f){
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, out);
   LIVE.lutReady = true; LIVE.lutFor = f.id;
 }
-function liveFrame(){
-  LIVE.raf = requestAnimationFrame(liveFrame);
+let liveChain = 0;
+function liveStart(){ liveChain++; liveFrame(liveChain); }
+function liveFrame(id){
+  if (id !== liveChain) return;   // purani chain band
+  // naya camera frame aane par hi chitra banao (phone par kam bojh)
+  if ('requestVideoFrameCallback' in HTMLVideoElement.prototype && video.srcObject){
+    video.requestVideoFrameCallback(() => liveFrame(id));
+  } else requestAnimationFrame(() => liveFrame(id));
   const gl = LIVE.gl, cv = $('#liveCv');
   if (!gl || !stream || !$('#review').hidden || document.hidden || video.readyState < 2) return;
   const dpr = Math.min(2, devicePixelRatio || 1);
@@ -1129,7 +1149,7 @@ function pickCamFilter(id){
 if (liveInit()){
   $('#liveCv').hidden = false; $('#cam').classList.add('lut');
   pickCamFilter(store.get('filter', 'hd'));
-  liveFrame();
+  liveStart();
 }
 renderCamFilters();
 
