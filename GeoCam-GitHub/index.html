@@ -293,17 +293,45 @@ function distM(a, b){
 }
 
 /* Online address (jab net ho) — cache bhi hota hai, baad mein offline kaam aaye */
+async function getJSON(url, ms){
+  const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), ms || 8000);
+  try{ const r = await fetch(url, { signal: ctrl.signal }); return r.ok ? await r.json() : null; }
+  catch(e){ return null; } finally{ clearTimeout(t); }
+}
+const clean = v => String(v || '').replace(/ (District|Block|Tehsil|Subdivision|CD Block)$/i, '').trim();
+
 async function maybeGeocode(){
   if (!pos || !navigator.onLine || maybeGeocode.busy) return;
   const la = pos.coords.latitude, lo = pos.coords.longitude;
-  if (geoAt && distM(geoAt, [la, lo]) < 150) return;
+  if (geoAt && distM(geoAt, [la, lo]) < 100) return;
   maybeGeocode.busy = true;
   try{
-    const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${la}&lon=${lo}&zoom=16&addressdetails=1&accept-language=en`);
-    const a = (await r.json()).address || {};
+    // 1) OpenStreetMap: sabse chhoti jagah tak (mohalla, tola, gaon)
+    const j = await getJSON(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${la}&lon=${lo}&zoom=18&addressdetails=1&accept-language=en`);
+    const a = (j && j.address) || {};
+    const town = a.city || a.town || a.municipality || '';
+    let local = a.neighbourhood || a.quarter || a.hamlet || a.suburb || a.village || a.isolated_dwelling || '';
+    let village = a.village || '';
+    // 2) OSM mein gaon/tola ka naam na mile to doosri free service se locality
+    if (!local || local === town){
+      const b = await getJSON(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${la}&longitude=${lo}&localityLanguage=en`);
+      if (b){
+        const loc = clean(b.locality);
+        if (loc && loc !== town && loc !== clean(b.city)) local = loc;
+        else if (b.localityInfo && Array.isArray(b.localityInfo.informative)){
+          const near = b.localityInfo.informative.find(x => x && x.name && x.order >= 8 && clean(x.name) !== town && !/time|zone|india|asia|plate|river/i.test(x.name + ' ' + (x.description || '')));
+          if (near) local = clean(near.name);
+        }
+        if (!town && b.city) a.town = b.city;
+      }
+    }
     addr = {
-      place: a.village || a.town || a.city || a.suburb || a.hamlet || '',
-      district: (a.state_district || a.county || '').replace(/ District$/,''),
+      road: a.road || '',
+      local: local,
+      village: village !== local ? village : '',
+      town: a.city || a.town || a.municipality || '',
+      block: clean(a.county || a.subdistrict || ''),
+      district: clean(a.state_district || ''),
       state: a.state || '', pin: a.postcode || '', country: a.country || 'India'
     };
     geoAt = [la, lo];
@@ -323,12 +351,13 @@ function plusCode(lat, lng){
   return code.slice(0, 12);
 }
 
-/* ---------- Address: sirf internet se, manual nahi ---------- */
 function addressLine(la, lo){
   if (!navigator.onLine || !addr || !geoAt || distM(geoAt, [la, lo]) > 300) return null;
   const parts = [];
-  const add = v => { v = String(v || '').trim(); if (v && !parts.includes(v)) parts.push(v); };
-  add(plusCode(la, lo).slice(4)); add(addr.place); add(addr.district);
+  const add = v => { v = String(v || '').trim(); if (v && !parts.some(p => p.toLowerCase() === v.toLowerCase())) parts.push(v); };
+  add(plusCode(la, lo).slice(4));
+  add(addr.road); add(addr.local); add(addr.village); add(addr.town);
+  add(addr.block); add(addr.district);
   add([addr.state, addr.pin].filter(Boolean).join(' ')); add(addr.country);
   return parts.join(', ');
 }
