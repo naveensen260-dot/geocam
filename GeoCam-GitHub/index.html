@@ -111,6 +111,9 @@ video{width:100%;height:100%;object-fit:cover;background:#000}
 .permBtn{width:100%;height:54px;margin-top:10px;border-radius:12px;background:var(--haldi);color:var(--ink);font-size:18px;font-weight:700}
 .permBtn:disabled{opacity:.6}
 .permHelp{margin-top:16px!important;padding:14px;border-radius:12px;background:#3a1f26;color:#ffd9d0!important;font-size:15px!important;white-space:pre-line}
+#flash{position:fixed;inset:0;background:#fff;opacity:0;pointer-events:none;z-index:8}
+#flash.on{animation:flash .28s ease-out}
+@keyframes flash{0%{opacity:.85}100%{opacity:0}}
 #busy{position:fixed;inset:0;background:rgba(13,23,38,.9);display:grid;place-content:center;justify-items:center;gap:14px;font-size:17px;z-index:4}
 .spin{width:44px;height:44px;border-radius:50%;border:4px solid rgba(255,255,255,.2);border-top-color:var(--haldi);animation:spin .8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
@@ -181,6 +184,7 @@ video{width:100%;height:100%;object-fit:cover;background:#000}
   </div>
 </section>
 
+<div id="flash" aria-hidden="true"></div>
 <div id="busy" hidden><div class="spin"></div><p id="busyTxt"></p></div>
 <div id="toast" role="status" hidden></div>
 
@@ -325,36 +329,28 @@ async function maybeGeocode(){
   if (geoAt && distM(geoAt, [la, lo]) < 100) return;
   maybeGeocode.busy = true;
   try{
-    // 1) Shahar, district, rajya, PIN (OpenStreetMap)
-    const [j, ov] = await Promise.all([
-      getJSON(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${la}&lon=${lo}&zoom=14&addressdetails=1&accept-language=en`),
-      // 2) Aas-paas ke gaon aur tole (OpenStreetMap ke naksha se, 3 km tak)
-      getJSON('https://overpass-api.de/api/interpreter?data=' + encodeURIComponent(
-        `[out:json][timeout:10];node(around:3000,${la},${lo})[place~"^(village|hamlet|neighbourhood|isolated_dwelling|suburb|quarter)$"];out body;`), 12000)
-    ]);
-    const a = (j && j.address) || {};
+    // OpenStreetMap: gaon/shahar star tak. Tola ka naam tabhi jab wo sach mein bilkul paas ho
+    const j = await getJSON(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${la}&lon=${lo}&zoom=14&addressdetails=1&accept-language=en`);
+    if (!j || !j.address) throw new Error('no address');
+    const a = j.address;
     const town = a.city || a.town || a.municipality || '';
-    const nm = t => (t.tags && (t.tags['name:en'] || t.tags.name)) || '';
-    const pts = ((ov && ov.elements) || []).filter(e => nm(e))
-      .map(e => ({ name: nm(e), type: e.tags.place, d: distM([la, lo], [e.lat, e.lon]) }))
-      .sort((p, q) => p.d - q.d);
-    // tola: sabse paas wala tola/basti, sirf 700 m ke andar
-    const tola = pts.find(p => p.type !== 'village' && p.d <= 700);
-    // gaon: sabse paas wala gaon, 3 km ke andar
-    const vil = pts.find(p => p.type === 'village' && p.d <= 3000);
-    let local = tola ? tola.name : '';
-    let village = vil ? vil.name : (a.village || '');
-    if (village && local && village.toLowerCase() === local.toLowerCase()) local = '';
+    // naksha wali jagah aapse kitni door hai? 700 m se door ho to us gaon/tola ka naam mat lo
+    const near = j.lat && j.lon ? distM([la, lo], [+j.lat, +j.lon]) <= 700 : false;
+    let local = '';
+    if (near && ['village', 'hamlet', 'suburb', 'neighbourhood', 'quarter'].includes(j.addresstype || j.type)){
+      local = a.village || a.hamlet || a.suburb || a.neighbourhood || a.quarter || '';
+    }
     addr = {
-      road: '', local, village: village !== town ? village : '',
-      town,
+      road: '',
+      local: local !== town ? local : '',
+      village: '',
+      town: town || (near ? '' : (a.village || '')),
       block: clean(a.county || a.subdistrict || ''),
       district: clean(a.state_district || ''),
       state: a.state || '', pin: a.postcode || '', country: a.country || 'India'
     };
-    if (!j && !ov) throw new Error('no data');
     geoAt = [la, lo];
-  }catch(e){ addr = addr && geoAt ? addr : null; }
+  }catch(e){}
   finally{ maybeGeocode.busy = false; renderLive(); }
 }
 function plusCode(lat, lng){
@@ -855,7 +851,7 @@ async function takeSnap(time){
   const aLine = pos ? addressLine(pos.coords.latitude, pos.coords.longitude) : null;
   return {
     pos, online: navigator.onLine, time: time || new Date(), addr: aLine,
-    place: aLine && addr ? [addr.local, addr.village || addr.town || addr.district, addr.state].filter(Boolean).join(', ') : '',
+    place: aLine && addr ? [addr.local || addr.town || addr.district, addr.state, addr.country].filter(Boolean).join(', ') : '',
     map: pos && MAP.canvas && distM([MAP.la, MAP.lo], [pos.coords.latitude, pos.coords.longitude]) < 80 ? MAP.canvas : null,
     mapCredit: MAP.credit || ''
   };
@@ -881,29 +877,42 @@ function openReview(src, sw, sh){
   $('#review').hidden = false;
 }
 
+function shutterFlash(){
+  const f = $('#flash'); f.classList.remove('on'); void f.offsetWidth; f.classList.add('on');
+  try{ if (navigator.vibrate) navigator.vibrate(30); }catch(e){}
+}
 async function capture(){
   if (!stream) return toast('Please start the camera first');
   if (!pos){ startGPS(); return toast('Location is needed for the photo. Turn on phone Location (GPS) and wait for the green GPS light.', 4500); }
-  busy(true);
-  snapNow = await takeSnap(new Date());
-  await new Promise(r => setTimeout(r, 40));
+  if (capture.busy) return;
+  capture.busy = true;
+  const tapTime = new Date();
+  const within = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
+  // 1) Button dabate hi usi pal ka frame pakad lo (hilne se pehle)
+  const frame = document.createElement('canvas');
+  frame.width = video.videoWidth; frame.height = video.videoHeight;
+  frame.getContext('2d').drawImage(video, 0, 0);
+  // 2) Usi pal camera se poori quality wali photo bhi maango (intezaar nahi)
+  let photoP = null;
   try{
+    if ('ImageCapture' in window){
+      photoP = within(new ImageCapture(stream.getVideoTracks()[0]).takePhoto(), 2500)
+        .then(bl => createImageBitmap(bl)).catch(() => null);
+    }
+  }catch(e){ photoP = null; }
+  // photo ban gayi: chamak + vibration, ab user hil sakta hai
+  if (photoP) photoP.then(() => shutterFlash()); else shutterFlash();
+  busy(true);
+  try{
+    // address aur naksha peeche-peeche (photo ruki nahi rehti)
+    const [snap, shot] = await Promise.all([takeSnap(tapTime), photoP || Promise.resolve(null)]);
+    snapNow = snap;
     try{ await document.fonts.load('600 40px Mukta'); }catch(e){}
-    let src = null, sw = 0, sh = 0;
-    try{
-      if ('ImageCapture' in window){
-        const ic = new ImageCapture(stream.getVideoTracks()[0]);
-        // camera se uski poori (maximum) resolution maango
-        const within = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
-        const blob = await within(ic.takePhoto(), 7000);
-        src = await createImageBitmap(blob); sw = src.width; sh = src.height;
-      }
-    }catch(e){ src = null; }
-    if (!src){ src = video; sw = video.videoWidth; sh = video.videoHeight; }
-    openReview(src, sw, sh);
+    if (shot) openReview(shot, shot.width, shot.height);
+    else openReview(frame, frame.width, frame.height);
   }catch(e){
     toast('Could not process the photo. Please try again.');
-  }finally{ busy(''); }
+  }finally{ busy(''); capture.busy = false; }
 }
 
 
