@@ -325,36 +325,36 @@ async function maybeGeocode(){
   if (geoAt && distM(geoAt, [la, lo]) < 100) return;
   maybeGeocode.busy = true;
   try{
-    // 1) OpenStreetMap: sabse chhoti jagah tak (mohalla, tola, gaon)
-    const j = await getJSON(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${la}&lon=${lo}&zoom=18&addressdetails=1&accept-language=en`);
+    // 1) Shahar, district, rajya, PIN (OpenStreetMap)
+    const [j, ov] = await Promise.all([
+      getJSON(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${la}&lon=${lo}&zoom=14&addressdetails=1&accept-language=en`),
+      // 2) Aas-paas ke gaon aur tole (OpenStreetMap ke naksha se, 3 km tak)
+      getJSON('https://overpass-api.de/api/interpreter?data=' + encodeURIComponent(
+        `[out:json][timeout:10];node(around:3000,${la},${lo})[place~"^(village|hamlet|neighbourhood|isolated_dwelling|suburb|quarter)$"];out body;`), 12000)
+    ]);
     const a = (j && j.address) || {};
     const town = a.city || a.town || a.municipality || '';
-    let local = a.neighbourhood || a.quarter || a.hamlet || a.suburb || a.village || a.isolated_dwelling || '';
-    let village = a.village || '';
-    // 2) OSM mein gaon/tola ka naam na mile to doosri free service se locality
-    if (!local || local === town){
-      const b = await getJSON(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${la}&longitude=${lo}&localityLanguage=en`);
-      if (b){
-        const loc = clean(b.locality);
-        if (loc && loc !== town && loc !== clean(b.city)) local = loc;
-        else if (b.localityInfo && Array.isArray(b.localityInfo.informative)){
-          const near = b.localityInfo.informative.find(x => x && x.name && x.order >= 8 && clean(x.name) !== town && !/time|zone|india|asia|plate|river/i.test(x.name + ' ' + (x.description || '')));
-          if (near) local = clean(near.name);
-        }
-        if (!town && b.city) a.town = b.city;
-      }
-    }
+    const nm = t => (t.tags && (t.tags['name:en'] || t.tags.name)) || '';
+    const pts = ((ov && ov.elements) || []).filter(e => nm(e))
+      .map(e => ({ name: nm(e), type: e.tags.place, d: distM([la, lo], [e.lat, e.lon]) }))
+      .sort((p, q) => p.d - q.d);
+    // tola: sabse paas wala tola/basti, sirf 700 m ke andar
+    const tola = pts.find(p => p.type !== 'village' && p.d <= 700);
+    // gaon: sabse paas wala gaon, 3 km ke andar
+    const vil = pts.find(p => p.type === 'village' && p.d <= 3000);
+    let local = tola ? tola.name : '';
+    let village = vil ? vil.name : (a.village || '');
+    if (village && local && village.toLowerCase() === local.toLowerCase()) local = '';
     addr = {
-      road: a.road || '',
-      local: local,
-      village: village !== local ? village : '',
-      town: a.city || a.town || a.municipality || '',
+      road: '', local, village: village !== town ? village : '',
+      town,
       block: clean(a.county || a.subdistrict || ''),
       district: clean(a.state_district || ''),
       state: a.state || '', pin: a.postcode || '', country: a.country || 'India'
     };
+    if (!j && !ov) throw new Error('no data');
     geoAt = [la, lo];
-  }catch(e){}
+  }catch(e){ addr = addr && geoAt ? addr : null; }
   finally{ maybeGeocode.busy = false; renderLive(); }
 }
 function plusCode(lat, lng){
@@ -855,7 +855,7 @@ async function takeSnap(time){
   const aLine = pos ? addressLine(pos.coords.latitude, pos.coords.longitude) : null;
   return {
     pos, online: navigator.onLine, time: time || new Date(), addr: aLine,
-    place: aLine && addr ? [addr.local || addr.village || addr.town, addr.state, addr.country].filter(Boolean).join(', ') : '',
+    place: aLine && addr ? [addr.local, addr.village || addr.town || addr.district, addr.state].filter(Boolean).join(', ') : '',
     map: pos && MAP.canvas && distM([MAP.la, MAP.lo], [pos.coords.latitude, pos.coords.longitude]) < 80 ? MAP.canvas : null,
     mapCredit: MAP.credit || ''
   };
@@ -1109,8 +1109,10 @@ function liveFrame(id){
     video.requestVideoFrameCallback(() => liveFrame(id));
   } else requestAnimationFrame(() => liveFrame(id));
   const gl = LIVE.gl, cv = $('#liveCv');
-  if (!gl || !stream || !$('#review').hidden || document.hidden || video.readyState < 2) return;
-  const dpr = Math.min(2, devicePixelRatio || 1);
+  if (!gl || !stream || !$('#review').hidden || !$('#busy').hidden || document.hidden || video.readyState < 2) return;
+  const now = performance.now(); if (now - (LIVE.last || 0) < 45) return;   // ~20 frame/sec kaafi hai
+  LIVE.last = now;
+  const dpr = Math.min(1.5, devicePixelRatio || 1);
   const W = Math.round(cv.clientWidth * dpr), H = Math.round(cv.clientHeight * dpr);
   if (!W || !H) return;
   if (cv.width !== W || cv.height !== H){ cv.width = W; cv.height = H; }
