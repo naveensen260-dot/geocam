@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0d1726">
+<meta name="theme-color" content="#000000">
 <meta name="geocam-app" content="1">
 <meta name="google" content="notranslate">
 <meta name="mobile-web-app-capable" content="yes">
@@ -15,7 +15,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Mukta:wght@400;600;700&display=swap" rel="stylesheet">
 <style>
 :root{
-  --ink:#0d1726; --band:#18263a; --haldi:#2ec4c8; --paper:#eef4fa; --muted:#9fb1c4; --danger:#e0674f;
+  --ink:#000000; --ink2:#111111; --ink-rgb:0,0,0; --band-rgb:28,28,28; --band:#1c1c1c; --haldi:#2ec4c8; --paper:#f2f2f2; --muted:#a3a3a3; --danger:#e0674f;
   --safe-t:env(safe-area-inset-top,0px); --safe-b:env(safe-area-inset-bottom,0px);
 }
 *{box-sizing:border-box}
@@ -31,7 +31,7 @@ video{width:100%;height:100%;object-fit:cover;background:#000}
 #cam.lut video{opacity:0}
 .camFilters{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;padding:2px 0}
 .camFilters::-webkit-scrollbar{display:none}
-.cf{flex:0 0 auto;height:34px;padding:0 14px;border-radius:999px;background:rgba(13,23,38,.8);color:var(--paper);font-size:14px;font-weight:600}
+.cf{flex:0 0 auto;height:34px;padding:0 14px;border-radius:999px;background:rgba(var(--ink-rgb),.8);color:var(--paper);font-size:14px;font-weight:600}
 .cf[aria-checked="true"]{background:var(--haldi);color:var(--ink)}
 .mirror{transform:scaleX(-1)}
 
@@ -45,7 +45,7 @@ video{width:100%;height:100%;object-fit:cover;background:#000}
 .top{padding:10px 12px;
   display:flex;gap:8px;align-items:center}
 .chip{display:flex;align-items:center;gap:7px;padding:6px 11px;border-radius:999px;
-  background:rgba(13,23,38,.8);font-size:14px;font-weight:600;white-space:nowrap}
+  background:rgba(var(--ink-rgb),.8);font-size:14px;font-weight:600;white-space:nowrap}
 .dot{width:10px;height:10px;border-radius:50%;background:var(--haldi);animation:pulse 1.2s infinite}
 #gps[data-state="ok"] .dot{background:#5fd18f;animation:none}
 #gps[data-state="weak"] .dot{background:var(--haldi);animation:none}
@@ -54,12 +54,12 @@ video{width:100%;height:100%;object-fit:cover;background:#000}
 
 .bottom{position:absolute;left:0;right:0;bottom:0;padding:0 12px calc(var(--safe-b) + 18px);
   display:flex;flex-direction:column;gap:10px;background:rgba(0,0,0,.45)}
-  background:rgba(13,23,38,.85);font-size:16px}
-.live{background:rgba(24,38,58,.9);border-radius:10px;padding:9px 13px;font-size:14px;line-height:1.35}
+  background:rgba(var(--ink-rgb),.85);font-size:16px}
+.live{background:rgba(var(--band-rgb),.9);border-radius:10px;padding:9px 13px;font-size:14px;line-height:1.35}
 .live p{margin:0}
 #liveCo{color:var(--muted);font-size:13px;margin-top:2px}
 .controls{display:flex;justify-content:space-between;align-items:center;padding:4px 16px 0}
-.round{width:52px;height:52px;border-radius:50%;background:rgba(13,23,38,.8);display:grid;place-items:center}
+.round{width:52px;height:52px;border-radius:50%;background:rgba(var(--ink-rgb),.8);display:grid;place-items:center}
 .shutter{width:76px;height:76px;border-radius:50%;background:var(--paper);
   box-shadow:0 0 0 5px rgba(0,0,0,.35),0 0 0 9px var(--haldi);transition:transform .08s}
 .shutter:active{transform:scale(.92)}
@@ -68,7 +68,7 @@ video{width:100%;height:100%;object-fit:cover;background:#000}
 .msg{position:absolute;left:20px;right:20px;top:35%;margin:0;padding:16px;border-radius:10px;
   background:var(--band);text-align:center;font-size:16px;line-height:1.45}
 
-.screen{position:fixed;inset:0;background:var(--ink);display:flex;flex-direction:column;padding-top:var(--safe-t)}
+.screen{position:fixed;inset:0;background:linear-gradient(165deg,var(--ink) 0%,var(--ink2) 100%);display:flex;flex-direction:column;padding-top:var(--safe-t)}
 .shotWrap{flex:1;min-height:0;position:relative}
 #shot{position:absolute;left:12px;top:12px;width:calc(100% - 24px);height:calc(100% - 12px);object-fit:contain}
 .filters,.cats,.actions,.meta{flex:0 0 auto}
@@ -93,7 +93,7 @@ video{width:100%;height:100%;object-fit:cover;background:#000}
 .fbtn[aria-checked="true"] img{border-color:var(--haldi)}
 
 
-.perm{position:fixed;inset:0;z-index:6;background:var(--ink);display:grid;place-items:center;
+.perm{position:fixed;inset:0;z-index:6;background:linear-gradient(165deg,var(--ink) 0%,var(--ink2) 100%);display:grid;place-items:center;
   padding:calc(var(--safe-t) + 20px) 20px calc(var(--safe-b) + 20px);overflow-y:auto}
 .permBox{width:100%;max-width:420px}
 .perm h1{margin:0 0 6px;font-size:28px}
@@ -114,7 +114,7 @@ video{width:100%;height:100%;object-fit:cover;background:#000}
 #flash{position:fixed;inset:0;background:#fff;opacity:0;pointer-events:none;z-index:8}
 #flash.on{animation:flash .28s ease-out}
 @keyframes flash{0%{opacity:.85}100%{opacity:0}}
-#busy{position:fixed;inset:0;background:rgba(13,23,38,.9);display:grid;place-content:center;justify-items:center;gap:14px;font-size:17px;z-index:4}
+#busy{position:fixed;inset:0;background:rgba(var(--ink-rgb),.9);display:grid;place-content:center;justify-items:center;gap:14px;font-size:17px;z-index:4}
 .spin{width:44px;height:44px;border-radius:50%;border:4px solid rgba(255,255,255,.2);border-top-color:var(--haldi);animation:spin .8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 #toast{position:fixed;left:16px;right:16px;top:calc(var(--safe-t) + 70px);padding:12px 14px;border-radius:10px;
@@ -189,6 +189,31 @@ video{width:100%;height:100%;object-fit:cover;background:#000}
 <div id="toast" role="status" hidden></div>
 
 <script>
+/* ---------- Har baar naya rang (theme) ---------- */
+const THEMES = [
+  // sab mein kaala background; sirf khaas rang (accent) badalta hai
+  { name:'Blue',   acc:'#2ec4c8' },
+  { name:'Gold',   acc:'#e9b949' },
+  { name:'Green',  acc:'#8bd450' },
+  { name:'Orange', acc:'#ff9f45' },
+  { name:'Pink',   acc:'#ff6fae' },
+  { name:'Coral',  acc:'#ff7f6b' },
+  { name:'Sky',    acc:'#5aa9ff' },
+  { name:'Purple', acc:'#b388ff' },
+  { name:'Mint',   acc:'#4ee0a6' },
+  { name:'Red',    acc:'#ff5c5c' }
+].map(t => Object.assign({ ink:'#000000', ink2:'#111111', band:'#1c1c1c', paper:'#f2f2f2', muted:'#a3a3a3' }, t));
+(function pickTheme(){
+  let i = 0;
+  try{ i = ((+localStorage.getItem('geocam.themeIdx') || 0) + 1) % THEMES.length; localStorage.setItem('geocam.themeIdx', i); }catch(e){}
+  const t = THEMES[i], r = document.documentElement.style;
+  const rgb = h => [1, 3, 5].map(k => parseInt(h.slice(k, k + 2), 16)).join(',');
+  r.setProperty('--ink', t.ink); r.setProperty('--ink2', t.ink2); r.setProperty('--ink-rgb', rgb(t.ink));
+  r.setProperty('--band', t.band); r.setProperty('--band-rgb', rgb(t.band));
+  r.setProperty('--haldi', t.acc); r.setProperty('--paper', t.paper); r.setProperty('--muted', t.muted);
+  const m = document.querySelector('meta[name="theme-color"]'); if (m) m.content = t.ink;
+})();
+
 const $ = s => document.querySelector(s);
 const video = $('#video');
 let stream = null, facing = 'environment', pos = null, addr = null, geoAt = null;
