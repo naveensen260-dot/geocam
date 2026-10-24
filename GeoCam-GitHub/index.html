@@ -922,21 +922,42 @@ function stamp(c, snap){
 function busy(t){ $('#busyTxt').textContent = typeof t === 'string' ? t : ''; $('#busy').hidden = !t; }
 
 /* Photo ke saath GPS, address aur naksha ka snapshot */
-async function takeSnap(time){
-  if (pos && navigator.onLine && !addressLine(pos.coords.latitude, pos.coords.longitude)){
-    maybeGeocode();
-    for (let i = 0; i < 20 && !addressLine(pos.coords.latitude, pos.coords.longitude); i++) await new Promise(r => setTimeout(r, 200));
-  }
-  if (pos && navigator.onLine && (!MAP.canvas || distM([MAP.la, MAP.lo], [pos.coords.latitude, pos.coords.longitude]) > 10)){
-    await Promise.race([prefetchMap(), new Promise(r => setTimeout(r, 3000))]);
-  }
-  const aLine = pos ? addressLine(pos.coords.latitude, pos.coords.longitude) : null;
+/* Photo ke pal ka GPS ka snapshot (bina intezaar) */
+function snapFrom(p, time){
+  const la = p ? p.coords.latitude : 0, lo = p ? p.coords.longitude : 0;
+  const aLine = p ? addressLine(la, lo) : null;
   return {
-    pos, online: navigator.onLine, time: time || new Date(), addr: aLine,
+    pos: p, online: navigator.onLine, time: time || new Date(), addr: aLine,
     place: aLine && addr ? [addr.local || addr.town || addr.district, addr.state, addr.country].filter(Boolean).join(', ') : '',
-    map: pos && MAP.canvas && distM([MAP.la, MAP.lo], [pos.coords.latitude, pos.coords.longitude]) < 30 ? MAP.canvas : null,
+    map: p && MAP.canvas && distM([MAP.la, MAP.lo], [la, lo]) < 30 ? MAP.canvas : null,
     mapCredit: MAP.credit || ''
   };
+}
+/* Address/naksha baad mein aaye to photo par apne aap jod do */
+let enrichActive = false;
+async function enrichSnap(snap){
+  enrichActive = true;
+  try{ await enrichLoop(snap); }finally{ enrichActive = false; }
+}
+async function enrichLoop(snap){
+  const p = snap.pos; if (!p || !navigator.onLine) return;
+  const la = p.coords.latitude, lo = p.coords.longitude;
+  if (snap.addr && snap.map) return;
+  if (!snap.addr) maybeGeocode();
+  if (!snap.map) prefetchMap();
+  let cur = snap;
+  for (let i = 0; i < 50; i++){          // max ~10 second
+    await new Promise(r => setTimeout(r, 200));
+    if (snapNow !== cur || $('#review').hidden) return;   // user aage badh gaya
+    const fresh = snapFrom(p, snap.time);
+    const newA = !cur.addr && fresh.addr, newM = !cur.map && fresh.map;
+    if (newA || newM){
+      fresh.addr = fresh.addr || cur.addr; fresh.place = fresh.place || cur.place; fresh.map = fresh.map || cur.map;
+      snapNow = cur = fresh; finalCache = null;
+      showFilter(filterId);               // jo mila wo photo par turant jod do
+    }
+    if (cur.addr && cur.map) return;
+  }
 }
 /* Photo ko HD banakar review screen kholna (dono camera ke liye) */
 function openReview(src, sw, sh){
@@ -955,9 +976,10 @@ function openReview(src, sw, sh){
   // har nayi photo par sabse pehle Auto ✨
   const saved = FILTERS.find(q => q.id === 'auto');
   filterId = saved.id; catId = saved.cat;
-  renderCats(); renderThumbs();
+  renderCats();
   showFilter(saved.id);
   $('#review').hidden = false;
+  setTimeout(() => { renderThumbs(); for (const b of document.querySelectorAll('.fbtn')) b.setAttribute('aria-checked', b.dataset.id === filterId); }, 30);
 }
 
 function shutterFlash(){
@@ -988,11 +1010,13 @@ async function capture(){
   busy(true);
   try{
     // address aur naksha peeche-peeche (photo ruki nahi rehti)
-    const [snap, shot] = await Promise.all([takeSnap(tapTime), photoP || Promise.resolve(null)]);
+    const shot = photoP ? await photoP : null;
+    const snap = snapFrom(pos, tapTime);   // turant; address/naksha peeche se judega
     snapNow = snap;
     try{ await document.fonts.load('600 40px Mukta'); }catch(e){}
     if (shot) openReview(shot, shot.width, shot.height);
     else openReview(frame, frame.width, frame.height);
+    enrichSnap(snap);
   }catch(e){
     toast('Could not process the photo. Please try again.');
   }finally{ busy(''); capture.busy = false; }
@@ -1106,6 +1130,11 @@ $('#bright').addEventListener('input', e => {
   brightAdj = e.target.value / 100; $('#brightVal').textContent = (e.target.value > 0 ? '+' : '') + e.target.value;
   clearTimeout(strTimer); strTimer = setTimeout(() => { if (base) showFilter(filterId); }, 120);
 });
+let preTimer = null;
+function precomputeFinal(){
+  clearTimeout(preTimer);
+  preTimer = setTimeout(() => { if (!$('#review').hidden) finalBlob(true).catch(() => {}); }, 900);
+}
 function showFilter(id){
   const f = FILTERS.find(q => q.id === id) || FILTERS[1];
   filterId = f.id; finalCache = null; store.set('filter', f.id);
@@ -1116,19 +1145,37 @@ function showFilter(id){
   const out = stamp(blended(prev, f), snapNow);
   $('#shot').src = out.toDataURL('image/jpeg', .88);
   $('#shotMeta').textContent = `${f.name} · ${base.width} × ${base.height} px`;
+  precomputeFinal();
 }
 
-async function finalBlob(){
-  if (finalCache && finalCache.id === filterId && finalCache.k === strength && finalCache.b === brightAdj && finalCache.s === smoothAdj && finalCache.v === vigAdj) return finalCache.blob;
-  busy(true);
-  await new Promise(r => setTimeout(r, 40));
+let finalJob = null;
+function finalKey(){ return [filterId, strength, brightAdj, smoothAdj, vigAdj].join('|'); }
+/* Poori quality wali final photo; peeche pehle se ban jaati hai taaki Save turant ho */
+async function finalBlob(silent){
+  if (!silent && enrichActive && snapNow && !snapNow.addr){
+    // Save dabane par address aane ka thoda (max 4 sec) intezaar
+    busy(true);
+    for (let i = 0; i < 20 && enrichActive && !snapNow.addr; i++) await new Promise(r => setTimeout(r, 200));
+    busy('');
+  }
+  const key = finalKey(), snap = snapNow;
+  if (finalCache && finalCache.key === key && finalCache.snap === snap) return finalCache.blob;
+  if (!silent) busy(true);
   try{
-    const f = FILTERS.find(q => q.id === filterId);
-    const out = stamp(blended(base, f), snapNow);
-    const blob = await new Promise(r => out.toBlob(r, 'image/jpeg', 0.95));
-    finalCache = { id: filterId, k: strength, b: brightAdj, s: smoothAdj, v: vigAdj, blob };
-    return blob;
-  }finally{ busy(''); }
+    if (!(finalJob && finalJob.key === key && finalJob.snap === snap)){
+      const job = { key, snap };
+      job.p = (async () => {
+        await new Promise(r => setTimeout(r, 40));
+        const f = FILTERS.find(q => q.id === filterId);
+        const out = stamp(blended(base, f), snap);
+        const blob = await new Promise(r => out.toBlob(r, 'image/jpeg', 0.95));
+        if (finalKey() === key && snapNow === snap) finalCache = { key, snap, blob };
+        return blob;
+      })();
+      finalJob = job;
+    }
+    return await finalJob.p;
+  }finally{ if (!silent) busy(''); }
 }
 
 /* App khulte hi Auto ✨ */
