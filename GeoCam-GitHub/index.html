@@ -760,10 +760,15 @@ function loadImg(url){
     setTimeout(() => fin(null), 8000); im.src = url;
   });
 }
-async function prefetchMap(){
-  if (!pos || !navigator.onLine || MAP.busy) return;
+function prefetchMap(){
+  if (!pos || !navigator.onLine) return Promise.resolve();
   const la = pos.coords.latitude, lo = pos.coords.longitude;
-  if (MAP.canvas && distM([MAP.la, MAP.lo], [la, lo]) < 25) return;
+  if (MAP.canvas && distM([MAP.la, MAP.lo], [la, lo]) < 10) return Promise.resolve();
+  if (MAP.busy) return MAP.pending || Promise.resolve();
+  MAP.pending = loadMap(la, lo);
+  return MAP.pending;
+}
+async function loadMap(la, lo){
   MAP.busy = true;
   try{
     const z = 17, [tx, ty] = tileXY(la, lo, z), S = 256;
@@ -897,11 +902,14 @@ async function takeSnap(time){
     maybeGeocode();
     for (let i = 0; i < 20 && !addressLine(pos.coords.latitude, pos.coords.longitude); i++) await new Promise(r => setTimeout(r, 200));
   }
+  if (pos && navigator.onLine && (!MAP.canvas || distM([MAP.la, MAP.lo], [pos.coords.latitude, pos.coords.longitude]) > 10)){
+    await Promise.race([prefetchMap(), new Promise(r => setTimeout(r, 3000))]);
+  }
   const aLine = pos ? addressLine(pos.coords.latitude, pos.coords.longitude) : null;
   return {
     pos, online: navigator.onLine, time: time || new Date(), addr: aLine,
     place: aLine && addr ? [addr.local || addr.town || addr.district, addr.state, addr.country].filter(Boolean).join(', ') : '',
-    map: pos && MAP.canvas && distM([MAP.la, MAP.lo], [pos.coords.latitude, pos.coords.longitude]) < 80 ? MAP.canvas : null,
+    map: pos && MAP.canvas && distM([MAP.la, MAP.lo], [pos.coords.latitude, pos.coords.longitude]) < 30 ? MAP.canvas : null,
     mapCredit: MAP.credit || ''
   };
 }
