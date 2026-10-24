@@ -218,6 +218,7 @@ const $ = s => document.querySelector(s);
 const video = $('#video');
 let stream = null, facing = 'environment', pos = null, addr = null, geoAt = null;
 let outName = '', base = null, prev = null, snapNow = null, filterId = null, finalCache = null;
+const APP_VERSION = 'v2610.6';
 const IS_GAS = typeof google !== 'undefined' && google.script && google.script.run;
 
 /* ---------- Local storage ---------- */
@@ -269,7 +270,7 @@ async function startCam(){
   }
   try{
     stream = await navigator.mediaDevices.getUserMedia({
-      audio:false, video:{ facingMode:{ ideal:facing }, width:{ ideal:4096 }, height:{ ideal:3072 } }
+      audio:false, video:{ facingMode:{ ideal:facing }, width:{ ideal:1920 }, height:{ ideal:1440 } }
     });
     video.srcObject = stream;
     if (LIVE.gl) setTimeout(liveStart, 300);
@@ -471,17 +472,18 @@ const FILTERS = [
   { id:'bw',       cat:'style',   name:'B&W',        p:{ hl:.20, sh:.10, con:.30, gray:1, sharp:.60 } }
 ];
 
-function copyCanvas(src, W, H){
+function copyCanvas(src, W, H, gpu){
+  // gpu = true: sirf dikhane/chhota karne ke liye (tez); warna pixel padhne ke liye
   const c = document.createElement('canvas');
   c.width = W || src.width; c.height = H || src.height;
-  const x = c.getContext('2d', { willReadFrequently:true });
+  const x = c.getContext('2d', gpu ? {} : { willReadFrequently:true });
   x.imageSmoothingEnabled = true; x.imageSmoothingQuality = 'high';
   x.drawImage(src, 0, 0, c.width, c.height);
   return c;
 }
-function scaledCopy(src, maxSide){
+function scaledCopy(src, maxSide, gpu){
   const s = Math.min(1, maxSide / Math.max(src.width, src.height));
-  return copyCanvas(src, Math.round(src.width * s), Math.round(src.height * s));
+  return copyCanvas(src, Math.round(src.width * s), Math.round(src.height * s), gpu);
 }
 
 function rgb2hsl(r, g, b){
@@ -961,13 +963,12 @@ async function enrichLoop(snap){
 }
 /* Photo ko HD banakar review screen kholna (dono camera ke liye) */
 function openReview(src, sw, sh){
-  const long = Math.max(sw, sh); let s = 1;
-  if (long < 3000) s = Math.min(2, 3600 / long);   // chhoti photo ko bada
-  if (long * s > 4000) s = 4000 / long;
-  base = copyCanvas(src, Math.round(sw * s), Math.round(sh * s));
-  prev = scaledCopy(base, 1100);
+  // phone par halka rahe: photo ko bada nahi karte, bahut badi ho to 2400 px tak chhota (WhatsApp/report ke liye kaafi)
+  const long = Math.max(sw, sh); const s = Math.min(1, 2400 / long);
+  base = copyCanvas(src, Math.round(sw * s), Math.round(sh * s), true);
+  prev = scaledCopy(base, 720, true);
   outName = `GeoCam_${fmt(snapNow.time).file}.jpg`;
-  thumbCache = {}; smallPrev = null;
+  thumbCache = {}; smallPrev = null; preDone = false;
   strength = 1; brightAdj = 0; smoothAdj = 0; vigAdj = 0;
   $('#vig').value = 0; $('#vigVal').textContent = '0';
   $('#smooth').value = 0; $('#smoothVal').textContent = '0';
@@ -997,25 +998,15 @@ async function capture(){
   const frame = document.createElement('canvas');
   frame.width = video.videoWidth; frame.height = video.videoHeight;
   frame.getContext('2d').drawImage(video, 0, 0);
-  // 2) Usi pal camera se poori quality wali photo bhi maango (intezaar nahi)
-  let photoP = null;
-  try{
-    if ('ImageCapture' in window){
-      photoP = within(new ImageCapture(stream.getVideoTracks()[0]).takePhoto(), 2500)
-        .then(bl => createImageBitmap(bl)).catch(() => null);
-    }
-  }catch(e){ photoP = null; }
-  // photo ban gayi: chamak + vibration, ab user hil sakta hai
-  if (photoP) photoP.then(() => shutterFlash()); else shutterFlash();
+  // turant: wahi frame photo hai (koi intezaar nahi)
+  shutterFlash();
   busy(true);
   try{
     // address aur naksha peeche-peeche (photo ruki nahi rehti)
-    const shot = photoP ? await photoP : null;
     const snap = snapFrom(pos, tapTime);   // turant; address/naksha peeche se judega
     snapNow = snap;
     try{ await document.fonts.load('600 40px Mukta'); }catch(e){}
-    if (shot) openReview(shot, shot.width, shot.height);
-    else openReview(frame, frame.width, frame.height);
+    openReview(frame, frame.width, frame.height);
     enrichSnap(snap);
   }catch(e){
     toast('Could not process the photo. Please try again.');
@@ -1131,10 +1122,14 @@ $('#bright').addEventListener('input', e => {
   clearTimeout(strTimer); strTimer = setTimeout(() => { if (base) showFilter(filterId); }, 120);
 });
 let preTimer = null;
+let preDone = false;
 function precomputeFinal(){
+  // sirf photo khulne ke baad ek baar, jab user kuch na chhoo raha ho (phone atke nahi)
+  if (preDone) return;
   clearTimeout(preTimer);
-  preTimer = setTimeout(() => { if (!$('#review').hidden) finalBlob(true).catch(() => {}); }, 900);
+  preTimer = setTimeout(() => { if (!$('#review').hidden && !preDone){ preDone = true; finalBlob(true).catch(() => {}); } }, 2500);
 }
+['pointerdown', 'input'].forEach(ev => document.addEventListener(ev, () => { if (!preDone) precomputeFinal(); }, true));
 function showFilter(id){
   const f = FILTERS.find(q => q.id === id) || FILTERS[1];
   filterId = f.id; finalCache = null; store.set('filter', f.id);
@@ -1144,7 +1139,7 @@ function showFilter(id){
   }
   const out = stamp(blended(prev, f), snapNow);
   $('#shot').src = out.toDataURL('image/jpeg', .88);
-  $('#shotMeta').textContent = `${f.name} · ${base.width} × ${base.height} px`;
+  $('#shotMeta').textContent = `${f.name} · ${base.width} × ${base.height} px · ${APP_VERSION}`;
   precomputeFinal();
 }
 
@@ -1168,7 +1163,7 @@ async function finalBlob(silent){
         await new Promise(r => setTimeout(r, 40));
         const f = FILTERS.find(q => q.id === filterId);
         const out = stamp(blended(base, f), snap);
-        const blob = await new Promise(r => out.toBlob(r, 'image/jpeg', 0.95));
+        const blob = await new Promise(r => out.toBlob(r, 'image/jpeg', 0.92));
         if (finalKey() === key && snapNow === snap) finalCache = { key, snap, blob };
         return blob;
       })();
@@ -1253,9 +1248,9 @@ function liveFrame(id){
   } else requestAnimationFrame(() => liveFrame(id));
   const gl = LIVE.gl, cv = $('#liveCv');
   if (!gl || !stream || !$('#review').hidden || !$('#busy').hidden || document.hidden || video.readyState < 2) return;
-  const now = performance.now(); if (now - (LIVE.last || 0) < 45) return;   // ~20 frame/sec kaafi hai
+  const now = performance.now(); if (now - (LIVE.last || 0) < 60) return;   // ~16 frame/sec kaafi hai
   LIVE.last = now;
-  const dpr = Math.min(1.5, devicePixelRatio || 1);
+  const dpr = 1;
   const W = Math.round(cv.clientWidth * dpr), H = Math.round(cv.clientHeight * dpr);
   if (!W || !H) return;
   if (cv.width !== W || cv.height !== H){ cv.width = W; cv.height = H; }
