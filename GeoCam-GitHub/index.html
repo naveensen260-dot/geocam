@@ -218,7 +218,7 @@ const $ = s => document.querySelector(s);
 const video = $('#video');
 let stream = null, facing = 'environment', pos = null, addr = null, geoAt = null;
 let outName = '', base = null, prev = null, snapNow = null, filterId = null, finalCache = null;
-const APP_VERSION = 'v2610.10';
+const APP_VERSION = 'v2610.11';
 const IS_GAS = typeof google !== 'undefined' && google.script && google.script.run;
 
 /* ---------- Local storage ---------- */
@@ -1008,6 +1008,26 @@ function openReview(src, sw, sh){
   setTimeout(() => { renderThumbs(); for (const b of document.querySelectorAll('.fbtn')) b.setAttribute('aria-checked', b.dataset.id === filterId); }, 30);
 }
 
+/* Phone kis taraf pakda hai (khada / leta) – gravity sensor se */
+let tilt = 'portrait';
+window.addEventListener('devicemotion', e => {
+  const g = e.accelerationIncludingGravity; if (!g) return;
+  const ax = g.x || 0, ay = g.y || 0;
+  if (Math.abs(ax) > 5.5 && Math.abs(ax) > Math.abs(ay) + 1.5) tilt = ax > 0 ? 'left' : 'right';
+  else if (Math.abs(ay) > 5.5 && Math.abs(ay) > Math.abs(ax) + 1.5) tilt = ay > 0 ? 'portrait' : 'upside';
+});
+function rotateFrame(c, how){
+  if (how === 'portrait') return c;
+  const r = document.createElement('canvas'), x = r.getContext('2d');
+  if (how === 'upside'){ r.width = c.width; r.height = c.height; x.translate(c.width, c.height); x.rotate(Math.PI); }
+  else {
+    r.width = c.height; r.height = c.width;
+    if (how === 'left'){ x.translate(0, c.width); x.rotate(-Math.PI / 2); }   // phone baayein ghooma
+    else { x.translate(c.height, 0); x.rotate(Math.PI / 2); }                  // phone daayein ghooma
+  }
+  x.drawImage(c, 0, 0);
+  return r;
+}
 function shutterFlash(){
   const f = $('#flash'); f.classList.remove('on'); void f.offsetWidth; f.classList.add('on');
   try{ if (navigator.vibrate) navigator.vibrate(30); }catch(e){}
@@ -1023,6 +1043,7 @@ async function capture(){
   const frame = document.createElement('canvas');
   frame.width = video.videoWidth; frame.height = video.videoHeight;
   frame.getContext('2d').drawImage(video, 0, 0);
+  const shotFrame = rotateFrame(frame, tilt);   // phone leta ho to photo bhi leti (horizontal)
   // turant: wahi frame photo hai (koi intezaar nahi)
   shutterFlash();
   busy(true);
@@ -1031,7 +1052,7 @@ async function capture(){
     const snap = snapFrom(pos, tapTime);   // turant; address/naksha peeche se judega
     snapNow = snap;
     try{ await document.fonts.load('600 40px Mukta'); }catch(e){}
-    openReview(frame, frame.width, frame.height);
+    openReview(shotFrame, shotFrame.width, shotFrame.height);
     enrichSnap(snap);
   }catch(e){
     toast('Could not process the photo. Please try again.');
