@@ -41,6 +41,8 @@ video{width:100%;height:100%;object-fit:cover;background:#000}
 .locbar span{flex:1}
 .locbar button{flex:0 0 auto;height:36px;padding:0 12px;border-radius:8px;background:#fff;color:#c0392b;font-weight:700;font-size:14px}
 .shutter.nogps{opacity:.45}
+.brand{white-space:nowrap}
+@media (max-width:400px){.brand{display:none}}
 .brand{margin-left:auto;font-weight:700;font-size:17px}
 .top{padding:10px 12px;
   display:flex;gap:8px;align-items:center}
@@ -109,6 +111,13 @@ video{width:100%;height:100%;object-fit:cover;background:#000}
 .perm p{margin:0 0 20px;color:var(--muted);font-size:16px;line-height:1.5}
 .prow{display:flex;align-items:center;gap:12px;padding:14px;margin-bottom:10px;border-radius:12px;background:var(--band)}
 .prow div{flex:1}
+.asrow{cursor:pointer}
+.pdot.as{background:var(--haldi)}
+.switch{appearance:none;-webkit-appearance:none;flex:0 0 auto;width:50px;height:28px;border-radius:999px;background:#444;position:relative;cursor:pointer;transition:background .2s}
+.switch::after{content:"";position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:#fff;transition:left .2s}
+.switch:checked{background:var(--haldi)}
+.switch:checked::after{left:25px}
+.switch:focus-visible{outline:3px solid var(--haldi);outline-offset:2px}
 .prow b{display:block;font-size:17px}
 .prow small{color:var(--muted);font-size:14px}
 .pdot{width:12px;height:12px;border-radius:50%;background:var(--haldi)}
@@ -194,6 +203,8 @@ video{width:100%;height:100%;object-fit:cover;background:#000}
     <p>GeoCam needs 2 permissions to stamp the correct location and time on your photos.</p>
     <div id="pCam" class="prow" data-st="prompt"><span class="pdot"></span><div><b>Camera</b><small>To take photos</small></div><span class="st">Pending</span></div>
     <div id="pLoc" class="prow" data-st="prompt"><span class="pdot"></span><div><b>Location (GPS)</b><small>For latitude, longitude and address</small></div><span class="st">Pending</span></div>
+    <label class="prow asrow" for="permAuto"><span class="pdot as"></span><div><b>Auto Save</b><small>Save every photo automatically</small></div>
+      <input id="permAuto" type="checkbox" class="switch"></label>
     <button id="permBtn" class="permBtn">Allow access</button>
     <p id="permHelp" class="permHelp" hidden></p>
   </div>
@@ -233,7 +244,7 @@ const $ = s => document.querySelector(s);
 const video = $('#video');
 let stream = null, facing = 'environment', pos = null, addr = null, geoAt = null;
 let outName = '', base = null, prev = null, snapNow = null, filterId = null, finalCache = null;
-const APP_VERSION = 'v2610.17';
+const APP_VERSION = 'v2610.20';
 const IS_GAS = typeof google !== 'undefined' && google.script && google.script.run;
 
 /* ---------- Local storage ---------- */
@@ -347,7 +358,7 @@ function startGPS(){
 $('#locRetry').onclick = () => { locBar('Checking location…'); startGPS(); };
 // Location ON karke app par wapas aate hi dobara check
 document.addEventListener('visibilitychange', () => { if (!document.hidden && !pos) startGPS(); });
-$('#gps').addEventListener('click', () => { if (!pos) startGPS(); });
+$('#gps').addEventListener('click', () => { if (!pos) startGPS(); else openStartScreen(); });
 
 function distM(a, b){
   const R = 6371000, r = Math.PI/180;
@@ -1125,6 +1136,7 @@ async function capture(){
     try{ await document.fonts.load('600 40px Mukta'); }catch(e){}
     openReview(shotFrame, shotFrame.width, shotFrame.height);
     enrichSnap(snap);
+    if (autoSave) setTimeout(() => savePhoto(true).catch(() => {}), 50);
   }catch(e){
     toast('Could not process the photo. Please try again.');
   }finally{ busy(''); capture.busy = false; }
@@ -1414,14 +1426,21 @@ renderCamFilters();
 $('#shutter').onclick = capture;
 $('#flip').onclick = () => { facing = facing === 'user' ? 'environment' : 'user'; startCam(); };
 $('#retake').onclick = () => { if (updatePending) return location.reload(); $('#review').hidden = true; store.set('filter', 'auto'); renderCamFilters(); pickCamFilter('auto'); };
-$('#save').onclick = async () => {
+async function savePhoto(auto){
   const blob = await finalBlob();
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob); a.download = outName;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 4000);
-  toast('Photo saved (Downloads folder)');
-};
+  toast(auto ? 'Photo auto-saved ✓ (Downloads)' : 'Photo saved (Downloads folder)');
+}
+$('#save').onclick = () => savePhoto(false);
+
+/* Auto Save: photo khinchte hi apne aap save */
+let autoSave = store.get('autoSave', true);
+function showAutoSave(){ $('#permAuto').checked = autoSave; }
+$('#permAuto').onchange = e => { autoSave = e.target.checked; store.set('autoSave', autoSave); toast(autoSave ? 'Auto Save ON (stays on until you turn it off)' : 'Auto Save OFF'); };
+showAutoSave();
 $('#share').onclick = async () => {
   const blob = await finalBlob();
   const file = new File([blob], outName, { type:'image/jpeg' });
@@ -1464,8 +1483,9 @@ const DENIED_HELP = 'Permission is blocked. To turn it on:\n1. Open Chrome → �
 const GPS_OFF_HELP = 'Phone Location (GPS) is off. Pull down the notification bar and turn on "Location". The app will continue by itself.';
 
 /* Camera aur GPS dono taiyaar? tabhi permission screen hate */
+let startManual = false;   // user ne khud kholi ho to apne aap band na ho
 function readyCheck(){
-  if (stream && pos){ $('#perm').hidden = true; permHelp(''); return true; }
+  if (stream && pos){ if (!startManual){ $('#perm').hidden = true; permHelp(''); } else { $('#permBtn').textContent = 'Continue'; } return true; }
   return false;
 }
 async function showPermScreen(){
@@ -1510,7 +1530,14 @@ async function initPerms(){
     }catch(e){}
   }
 }
-$('#permBtn').onclick = askPermissions;
+function openStartScreen(){
+  startManual = true;
+  $('#perm').hidden = false; permHelp(''); refreshPerm();
+  $('#permBtn').textContent = (stream && pos) ? 'Continue' : 'Allow access';
+}
+$('#permBtn').onclick = () => { if (stream && pos){ startManual = false; $('#perm').hidden = true; } else askPermissions(); };
+// naye update ke baad ek baar shuruaati screen dikhao, taaki Auto Save ka switch dikhe
+if (!store.get('asIntro', 0)){ store.set('asIntro', 1); setTimeout(openStartScreen, 1200); }
 
 setNet();
 initPerms();
