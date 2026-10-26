@@ -218,7 +218,7 @@ const $ = s => document.querySelector(s);
 const video = $('#video');
 let stream = null, facing = 'environment', pos = null, addr = null, geoAt = null;
 let outName = '', base = null, prev = null, snapNow = null, filterId = null, finalCache = null;
-const APP_VERSION = 'v2610.6';
+const APP_VERSION = 'v2610.8';
 const IS_GAS = typeof google !== 'undefined' && google.script && google.script.run;
 
 /* ---------- Local storage ---------- */
@@ -355,22 +355,19 @@ async function maybeGeocode(){
   if (geoAt && distM(geoAt, [la, lo]) < 100) return;
   maybeGeocode.busy = true;
   try{
-    // OpenStreetMap: gaon/shahar star tak. Tola ka naam tabhi jab wo sach mein bilkul paas ho
-    const j = await getJSON(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${la}&lon=${lo}&zoom=14&addressdetails=1&accept-language=en`);
+    // OpenStreetMap se gaon / tola / shahar ka naam
+    const j = await getJSON(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${la}&lon=${lo}&zoom=16&addressdetails=1&accept-language=en`);
     if (!j || !j.address) throw new Error('no address');
     const a = j.address;
+    const d = j.lat && j.lon ? distM([la, lo], [+j.lat, +j.lon]) : 0;
     const town = a.city || a.town || a.municipality || '';
-    // naksha wali jagah aapse kitni door hai? 700 m se door ho to us gaon/tola ka naam mat lo
-    const near = j.lat && j.lon ? distM([la, lo], [+j.lat, +j.lon]) <= 700 : false;
-    let local = '';
-    if (near && ['village', 'hamlet', 'suburb', 'neighbourhood', 'quarter'].includes(j.addresstype || j.type)){
-      local = a.village || a.hamlet || a.suburb || a.neighbourhood || a.quarter || '';
-    }
+    // gaon: 5 km ke andar ka naam (gaon bade hote hain); tola/basti: 1.5 km ke andar
+    let village = d <= 5000 ? (a.village || '') : '';
+    let tola = d <= 1500 ? (a.hamlet || a.neighbourhood || a.suburb || a.quarter || '') : '';
+    if (!village && tola && !town){ village = tola; tola = ''; }
+    if (tola && village && tola.toLowerCase() === village.toLowerCase()) tola = '';
     addr = {
-      road: '',
-      local: local !== town ? local : '',
-      village: '',
-      town: town || (near ? '' : (a.village || '')),
+      road: '', local: tola, village: village !== town ? village : '', town,
       block: clean(a.county || a.subdistrict || ''),
       district: clean(a.state_district || ''),
       state: a.state || '', pin: a.postcode || '', country: a.country || 'India'
@@ -561,6 +558,19 @@ function applyMatch(d, M){
     d[i] = Y + 1.402*Cr; d[i+1] = Y - .344136*Cb - .714136*Cr; d[i+2] = Y + 1.772*Cb;
   }
 }
+
+/* App background se wapas aaye to naya version check karo (bina band kiye update) */
+async function checkNewVersion(){
+  if (IS_GAS || !navigator.onLine || !$('#review').hidden) return;
+  try{
+    const r = await fetch('index.html?v=' + Date.now(), { cache:'no-store' });
+    const t = await r.text();
+    const m = t.match(/APP_VERSION = '([^']+)'/);
+    if (m && m[1] !== APP_VERSION) location.reload();
+  }catch(e){}
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) setTimeout(checkNewVersion, 800); });
+setTimeout(checkNewVersion, 4000);
 
 /* Auto ✨: har photo ko jaanch kar uske hisaab se sudhaar */
 function autoParams(src){
@@ -930,7 +940,7 @@ function snapFrom(p, time){
   const aLine = p ? addressLine(la, lo) : null;
   return {
     pos: p, online: navigator.onLine, time: time || new Date(), addr: aLine,
-    place: aLine && addr ? [addr.local || addr.town || addr.district, addr.state, addr.country].filter(Boolean).join(', ') : '',
+    place: aLine && addr ? [addr.village || addr.local || addr.town || addr.district, addr.state, addr.country].filter(Boolean).join(', ') : '',
     map: p && MAP.canvas && distM([MAP.la, MAP.lo], [la, lo]) < 30 ? MAP.canvas : null,
     mapCredit: MAP.credit || ''
   };
