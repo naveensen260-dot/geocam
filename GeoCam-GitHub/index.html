@@ -218,7 +218,7 @@ const $ = s => document.querySelector(s);
 const video = $('#video');
 let stream = null, facing = 'environment', pos = null, addr = null, geoAt = null;
 let outName = '', base = null, prev = null, snapNow = null, filterId = null, finalCache = null;
-const APP_VERSION = 'v2610.8';
+const APP_VERSION = 'v2610.9';
 const IS_GAS = typeof google !== 'undefined' && google.script && google.script.run;
 
 /* ---------- Local storage ---------- */
@@ -364,6 +364,15 @@ async function maybeGeocode(){
     // gaon: 5 km ke andar ka naam (gaon bade hote hain); tola/basti: 1.5 km ke andar
     let village = d <= 5000 ? (a.village || '') : '';
     let tola = d <= 1500 ? (a.hamlet || a.neighbourhood || a.suburb || a.quarter || '') : '';
+    // Naksha (Nominatim) mein gaon na mile to OpenStreetMap ke gaon-bindu se sabse paas wala gaon (4 km tak)
+    if (!village){
+      const ov = await getJSON('https://overpass-api.de/api/interpreter?data=' + encodeURIComponent(
+        `[out:json][timeout:8];node(around:4000,${la},${lo})[place~"^(village|hamlet)$"][name];out body;`), 9000);
+      const pts = ((ov && ov.elements) || []).map(e => ({ n: (e.tags['name:en'] || e.tags.name || '').trim(), t: e.tags.place, d: distM([la, lo], [e.lat, e.lon]) }))
+        .filter(p => p.n).sort((p, q) => p.d - q.d);
+      const v = pts.find(p => p.t === 'village') || pts.find(p => p.t === 'hamlet' && p.d <= 1500);
+      if (v) village = v.n;
+    }
     if (!village && tola && !town){ village = tola; tola = ''; }
     if (tola && village && tola.toLowerCase() === village.toLowerCase()) tola = '';
     addr = {
