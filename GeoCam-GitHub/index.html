@@ -218,7 +218,7 @@ const $ = s => document.querySelector(s);
 const video = $('#video');
 let stream = null, facing = 'environment', pos = null, addr = null, geoAt = null;
 let outName = '', base = null, prev = null, snapNow = null, filterId = null, finalCache = null;
-const APP_VERSION = 'v2610.15';
+const APP_VERSION = 'v2610.16';
 const IS_GAS = typeof google !== 'undefined' && google.script && google.script.run;
 
 /* ---------- Local storage ---------- */
@@ -410,6 +410,8 @@ async function maybeGeocode(){
       const v = pts.find(p => p.t === 'village') || pts.find(p => p.t === 'hamlet' && p.d <= 1500);
       if (v) village = v.n;
     }
+    const dist0 = clean(a.state_district || (ola && ola.district) || '').toLowerCase();
+    if (village && dist0 && village.toLowerCase() === dist0) village = '';   // 'Simdega' gaon nahi, district/shahar hai
     if (!village && tola && !town){ village = tola; tola = ''; }
     if (tola && village && tola.toLowerCase() === village.toLowerCase()) tola = '';
     addr = {
@@ -995,7 +997,7 @@ function snapFrom(p, time){
   const aLine = p ? addressLine(la, lo) : null;
   return {
     pos: p, online: navigator.onLine, time: time || new Date(), addr: aLine,
-    place: aLine && addr ? [addr.village || addr.local || addr.town || addr.district, addr.state, addr.country].filter(Boolean).join(', ') : '',
+    place: aLine && addr ? [addr.local || addr.village || addr.town || addr.district, addr.state, addr.country].filter(Boolean).join(', ') : '',   // sabse chhoti jagah (tola) upar
     map: p && MAP.canvas && distM([MAP.la, MAP.lo], [la, lo]) < 30 ? MAP.canvas : null,
     mapCredit: MAP.credit || ''
   };
