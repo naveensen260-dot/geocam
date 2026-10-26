@@ -244,7 +244,7 @@ const $ = s => document.querySelector(s);
 const video = $('#video');
 let stream = null, facing = 'environment', pos = null, addr = null, geoAt = null;
 let outName = '', base = null, prev = null, snapNow = null, filterId = null, finalCache = null;
-const APP_VERSION = 'v2610.20';
+const APP_VERSION = 'v2610.21';
 const IS_GAS = typeof google !== 'undefined' && google.script && google.script.run;
 
 /* ---------- Local storage ---------- */
@@ -1437,7 +1437,7 @@ async function savePhoto(auto){
 $('#save').onclick = () => savePhoto(false);
 
 /* Auto Save: photo khinchte hi apne aap save */
-let autoSave = store.get('autoSave', true);
+let autoSave = store.get('autoSave', false);   // pehli baar hamesha OFF; user khud ON kare
 function showAutoSave(){ $('#permAuto').checked = autoSave; }
 $('#permAuto').onchange = e => { autoSave = e.target.checked; store.set('autoSave', autoSave); toast(autoSave ? 'Auto Save ON (stays on until you turn it off)' : 'Auto Save OFF'); };
 showAutoSave();
