@@ -218,7 +218,7 @@ const $ = s => document.querySelector(s);
 const video = $('#video');
 let stream = null, facing = 'environment', pos = null, addr = null, geoAt = null;
 let outName = '', base = null, prev = null, snapNow = null, filterId = null, finalCache = null;
-const APP_VERSION = 'v2610.11';
+const APP_VERSION = 'v2610.15';
 const IS_GAS = typeof google !== 'undefined' && google.script && google.script.run;
 
 /* ---------- Local storage ---------- */
@@ -349,22 +349,59 @@ async function getJSON(url, ms){
 }
 const clean = v => String(v || '').replace(/ (District|Block|Tehsil|Subdivision|CD Block)$/i, '').trim();
 
+/* Apni gaon-suchi: jahan free naksha mein naam nahi, wahan yahin se (bina internet ke bhi)
+   Naya gaon jodne ke liye: { name:'Gaon', lat:.., lon:.., r: metre } */
+const LOCAL_PLACES = [
+  { name:'Bangru', lat:22.62886, lon:84.525877, r:1800 }
+];
+function localPlace(la, lo){
+  let best = null, bd = Infinity;
+  for (const p of LOCAL_PLACES){ const d = distM([la, lo], [p.lat, p.lon]); if (d <= p.r && d < bd){ bd = d; best = p; } }
+  return best ? best.name : '';
+}
+/* Ola Maps (Bharat ka naksha) – gaon/tola ka naam */
+const OLA_KEY = '5eoqoKG4PhdRQ4mAuBhKZCbqYWdYb5Tyos1MOYe3';
+async function olaPlace(la, lo){
+  if (!OLA_KEY) return null;
+  const j = await getJSON(`https://api.olamaps.io/places/v1/reverse-geocode?latlng=${la},${lo}&api_key=${OLA_KEY}`, 8000);
+  const r = j && Array.isArray(j.results) ? j.results : [];
+  if (!r.length) return null;
+  const comps = r[0].address_components || [];
+  const get = (...types) => { for (const t of types){ const c = comps.find(x => (x.types || []).includes(t)); if (c && c.long_name) return c.long_name.trim(); } return ''; };
+  return {
+    tola: get('sublocality_level_2', 'sublocality_level_1', 'neighborhood', 'sublocality'),
+    village: get('locality', 'administrative_area_level_4', 'administrative_area_level_5'),
+    district: get('administrative_area_level_2', 'administrative_area_level_3'),
+    state: get('administrative_area_level_1'), pin: get('postal_code')
+  };
+}
+
 async function maybeGeocode(){
   if (!pos || !navigator.onLine || maybeGeocode.busy) return;
   const la = pos.coords.latitude, lo = pos.coords.longitude;
   if (geoAt && distM(geoAt, [la, lo]) < 100) return;
   maybeGeocode.busy = true;
   try{
-    // OpenStreetMap se gaon / tola / shahar ka naam
-    const j = await getJSON(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${la}&lon=${lo}&zoom=16&addressdetails=1&accept-language=en`);
-    if (!j || !j.address) throw new Error('no address');
-    const a = j.address;
-    const d = j.lat && j.lon ? distM([la, lo], [+j.lat, +j.lon]) : 0;
+    // Ola Maps aur OpenStreetMap dono ek saath (jaldi)
+    const [ola, j] = await Promise.all([
+      olaPlace(la, lo).catch(() => null),
+      getJSON(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${la}&lon=${lo}&zoom=16&addressdetails=1&accept-language=en`)
+    ]);
+    const a = (j && j.address) || {};
+    if (!ola && !j) throw new Error('no address');
+    const d = j && j.lat && j.lon ? distM([la, lo], [+j.lat, +j.lon]) : 0;
     const town = a.city || a.town || a.municipality || '';
-    // gaon: 5 km ke andar ka naam (gaon bade hote hain); tola/basti: 1.5 km ke andar
-    let village = d <= 5000 ? (a.village || '') : '';
-    let tola = d <= 1500 ? (a.hamlet || a.neighbourhood || a.suburb || a.quarter || '') : '';
-    // Naksha (Nominatim) mein gaon na mile to OpenStreetMap ke gaon-bindu se sabse paas wala gaon (4 km tak)
+    const isTown = n => n && town && n.toLowerCase() === town.toLowerCase();
+    let village = '', tola = '';
+    // 1) apni gaon-suchi
+    const lp = localPlace(la, lo);
+    if (lp) village = lp;
+    // 2) Ola Maps (Google jaisa Bharat ka data)
+    if (!village && ola && ola.village && !/^simdega$/i.test(ola.village)) village = ola.village;
+    if (ola && ola.tola && !isTown(ola.tola)) tola = ola.tola;
+    // 3) OpenStreetMap
+    if (!village && d <= 5000) village = a.village || '';
+    if (!tola && d <= 1500) tola = a.hamlet || a.neighbourhood || a.suburb || a.quarter || '';
     if (!village){
       const ov = await getJSON('https://overpass-api.de/api/interpreter?data=' + encodeURIComponent(
         `[out:json][timeout:8];node(around:4000,${la},${lo})[place~"^(village|hamlet)$"][name];out body;`), 9000);
@@ -376,10 +413,10 @@ async function maybeGeocode(){
     if (!village && tola && !town){ village = tola; tola = ''; }
     if (tola && village && tola.toLowerCase() === village.toLowerCase()) tola = '';
     addr = {
-      road: '', local: tola, village: village !== town ? village : '', town,
+      road: '', local: tola, village: !isTown(village) ? village : '', town: town || (ola && /^simdega$/i.test(ola.village) ? 'Simdega' : ''),
       block: clean(a.county || a.subdistrict || ''),
-      district: clean(a.state_district || ''),
-      state: a.state || '', pin: a.postcode || '', country: a.country || 'India'
+      district: clean(a.state_district || (ola && ola.district) || ''),
+      state: a.state || (ola && ola.state) || '', pin: a.postcode || (ola && ola.pin) || '', country: a.country || 'India'
     };
     geoAt = [la, lo];
   }catch(e){}
@@ -399,7 +436,10 @@ function plusCode(lat, lng){
 }
 
 function addressLine(la, lo){
-  if (!navigator.onLine || !addr || !geoAt || distM(geoAt, [la, lo]) > 300) return null;
+  if (!navigator.onLine || !addr || !geoAt || distM(geoAt, [la, lo]) > 300){
+    const lp = localPlace(la, lo);   // bina internet: apni suchi se gaon
+    return lp ? `${plusCode(la, lo).slice(4)}, ${lp}, Simdega, Jharkhand, India` : null;
+  }
   const parts = [];
   const add = v => { v = String(v || '').trim(); if (v && !parts.some(p => p.toLowerCase() === v.toLowerCase())) parts.push(v); };
   add(plusCode(la, lo).slice(4));
@@ -1043,7 +1083,9 @@ async function capture(){
   const frame = document.createElement('canvas');
   frame.width = video.videoWidth; frame.height = video.videoHeight;
   frame.getContext('2d').drawImage(video, 0, 0);
-  const shotFrame = rotateFrame(frame, tilt);   // phone leta ho to photo bhi leti (horizontal)
+  // selfie (aage wala) camera mein ghoomne ki disha ulti hoti hai
+  const how = facing === 'user' ? ({ left:'right', right:'left' }[tilt] || tilt) : tilt;
+  const shotFrame = rotateFrame(frame, how);   // phone leta ho to photo bhi leti (horizontal)
   // turant: wahi frame photo hai (koi intezaar nahi)
   shutterFlash();
   busy(true);
