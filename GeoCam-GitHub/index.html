@@ -218,7 +218,7 @@ const $ = s => document.querySelector(s);
 const video = $('#video');
 let stream = null, facing = 'environment', pos = null, addr = null, geoAt = null;
 let outName = '', base = null, prev = null, snapNow = null, filterId = null, finalCache = null;
-const APP_VERSION = 'v2610.9';
+const APP_VERSION = 'v2610.10';
 const IS_GAS = typeof google !== 'undefined' && google.script && google.script.run;
 
 /* ---------- Local storage ---------- */
@@ -575,7 +575,13 @@ async function checkNewVersion(){
     const r = await fetch('index.html?v=' + Date.now(), { cache:'no-store' });
     const t = await r.text();
     const m = t.match(/APP_VERSION = '([^']+)'/);
-    if (m && m[1] !== APP_VERSION) location.reload();
+    if (m && m[1] !== APP_VERSION){
+      // ek version ke liye sirf ek baar; ?v= se purani copy (cache) ko bypass
+      let done = ''; try{ done = sessionStorage.getItem('geocam.rel') || ''; }catch(e){}
+      if (done === m[1]) return;
+      try{ sessionStorage.setItem('geocam.rel', m[1]); }catch(e){}
+      location.replace(location.pathname + '?v=' + encodeURIComponent(m[1]));
+    }
   }catch(e){}
 }
 document.addEventListener('visibilitychange', () => { if (!document.hidden) setTimeout(checkNewVersion, 800); });
