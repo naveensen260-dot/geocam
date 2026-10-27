@@ -246,7 +246,7 @@ const $ = s => document.querySelector(s);
 const video = $('#video');
 let stream = null, facing = 'environment', pos = null, addr = null, geoAt = null;
 let outName = '', base = null, prev = null, snapNow = null, filterId = null, finalCache = null;
-const APP_VERSION = 'v2610.25';
+const APP_VERSION = 'v2610.26';
 const IS_GAS = typeof google !== 'undefined' && google.script && google.script.run;
 
 /* ---------- Local storage ---------- */
@@ -1482,7 +1482,7 @@ function quickSave(shot, tapTime){
     try{
       const long = Math.max(shot.width, shot.height), s = Math.min(1, 1600 / long);   // WhatsApp/report ke liye kaafi, aur tez
       const b = copyCanvas(shot, Math.round(shot.width * s), Math.round(shot.height * s), true);
-      const f = FILTERS.find(q => q.id === store.get('filter', 'auto')) || FILTERS.find(q => q.id === 'auto');
+      const f = FILTERS.find(q => q.id === 'auto');   // Auto Save mein hamesha Auto ✨
       const out = stamp(quickFilter(b, f.p), snap);
       const blob = await new Promise(r => out.toBlob(r, 'image/jpeg', 0.9));
       const a = document.createElement('a');
