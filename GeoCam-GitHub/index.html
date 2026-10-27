@@ -244,7 +244,7 @@ const $ = s => document.querySelector(s);
 const video = $('#video');
 let stream = null, facing = 'environment', pos = null, addr = null, geoAt = null;
 let outName = '', base = null, prev = null, snapNow = null, filterId = null, finalCache = null;
-const APP_VERSION = 'v2610.21';
+const APP_VERSION = 'v2610.23';
 const IS_GAS = typeof google !== 'undefined' && google.script && google.script.run;
 
 /* ---------- Local storage ---------- */
@@ -1128,15 +1128,15 @@ async function capture(){
   const shotFrame = rotateFrame(frame, how);   // phone leta ho to photo bhi leti (horizontal)
   // turant: wahi frame photo hai (koi intezaar nahi)
   shutterFlash();
+  if (autoSave){ quickSave(shotFrame, tapTime); return; }   // Auto Save: seedha save, camera par hi rahein
   busy(true);
   try{
     // address aur naksha peeche-peeche (photo ruki nahi rehti)
     const snap = snapFrom(pos, tapTime);   // turant; address/naksha peeche se judega
     snapNow = snap;
-    try{ await document.fonts.load('600 40px Mukta'); }catch(e){}
+    try{ await Promise.race([document.fonts.load('600 40px Mukta'), new Promise(r => setTimeout(r, 300))]); }catch(e){}
     openReview(shotFrame, shotFrame.width, shotFrame.height);
     enrichSnap(snap);
-    if (autoSave) setTimeout(() => savePhoto(true).catch(() => {}), 50);
   }catch(e){
     toast('Could not process the photo. Please try again.');
   }finally{ busy(''); capture.busy = false; }
@@ -1276,11 +1276,12 @@ let finalJob = null;
 function finalKey(){ return [filterId, strength, brightAdj, smoothAdj, vigAdj].join('|'); }
 /* Poori quality wali final photo; peeche pehle se ban jaati hai taaki Save turant ho */
 async function finalBlob(silent){
-  if (!silent && enrichActive && snapNow && !snapNow.addr){
-    // Save dabane par address aane ka thoda (max 4 sec) intezaar
-    busy(true);
-    for (let i = 0; i < 20 && enrichActive && !snapNow.addr; i++) await new Promise(r => setTimeout(r, 200));
-    busy('');
+  const quick = silent === 'auto';
+  if ((!silent || quick) && enrichActive && snapNow && !snapNow.addr){
+    // address aane ka thoda intezaar: Save par max 4 sec, Auto Save par max 1 sec
+    if (!quick) busy(true);
+    for (let i = 0; i < (quick ? 10 : 20) && enrichActive && !snapNow.addr; i++) await new Promise(r => setTimeout(r, 100 * (quick ? 1 : 2)));
+    if (!quick) busy('');
   }
   const key = finalKey(), snap = snapNow;
   if (finalCache && finalCache.key === key && finalCache.snap === snap) return finalCache.blob;
@@ -1289,7 +1290,7 @@ async function finalBlob(silent){
     if (!(finalJob && finalJob.key === key && finalJob.snap === snap)){
       const job = { key, snap };
       job.p = (async () => {
-        await new Promise(r => setTimeout(r, 40));
+        if (!quick) await new Promise(r => setTimeout(r, 40));
         const f = FILTERS.find(q => q.id === filterId);
         const out = stamp(blended(base, f), snap);
         const blob = await new Promise(r => out.toBlob(r, 'image/jpeg', 0.92));
@@ -1376,7 +1377,7 @@ function liveFrame(id){
     video.requestVideoFrameCallback(() => liveFrame(id));
   } else requestAnimationFrame(() => liveFrame(id));
   const gl = LIVE.gl, cv = $('#liveCv');
-  if (!gl || !stream || !$('#review').hidden || !$('#busy').hidden || document.hidden || video.readyState < 2) return;
+  if (!gl || !stream || LIVE.hold || !$('#review').hidden || !$('#busy').hidden || document.hidden || video.readyState < 2) return;
   const now = performance.now(); if (now - (LIVE.last || 0) < 60) return;   // ~16 frame/sec kaafi hai
   LIVE.last = now;
   const dpr = 1;
@@ -1426,8 +1427,31 @@ renderCamFilters();
 $('#shutter').onclick = capture;
 $('#flip').onclick = () => { facing = facing === 'user' ? 'environment' : 'user'; startCam(); };
 $('#retake').onclick = () => { if (updatePending) return location.reload(); $('#review').hidden = true; store.set('filter', 'auto'); renderCamFilters(); pickCamFilter('auto'); };
+/* Auto Save: koi review/filter screen nahi, gola nahi – photo seedha save, camera taiyaar */
+let quickN = 0;
+function quickSave(shot, tapTime){
+  const snap = snapFrom(pos, tapTime);           // jo address/naksha abhi hai wahi (intezaar nahi)
+  const name = `GeoCam_${fmt(tapTime).file}${quickN++ ? '_' + quickN : ''}.jpg`;
+  capture.busy = false;                          // agli photo turant le sakte hain
+  LIVE.hold = (LIVE.hold || 0) + 1;              // save hote waqt live preview thoda ruke (phone ka poora zor save par)
+  setTimeout(async () => {
+    try{
+      const long = Math.max(shot.width, shot.height), s = Math.min(1, 2400 / long);
+      const b = copyCanvas(shot, Math.round(shot.width * s), Math.round(shot.height * s), true);
+      const f = FILTERS.find(q => q.id === store.get('filter', 'auto')) || FILTERS.find(q => q.id === 'auto');
+      const out = stamp(applyFilter(b, f.p), snap);
+      const blob = await new Promise(r => out.toBlob(r, 'image/jpeg', 0.92));
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob); a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+      toast('Saved ✓', 1500);
+    }catch(e){ toast('Could not save the photo. Please try again.'); }
+    finally{ LIVE.hold = Math.max(0, LIVE.hold - 1); }
+  }, 30);   // flash dikhne ke baad kaam shuru
+}
 async function savePhoto(auto){
-  const blob = await finalBlob();
+  const blob = await finalBlob(auto ? 'auto' : false);
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob); a.download = outName;
   document.body.appendChild(a); a.click(); a.remove();
