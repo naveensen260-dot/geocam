@@ -244,7 +244,7 @@ const $ = s => document.querySelector(s);
 const video = $('#video');
 let stream = null, facing = 'environment', pos = null, addr = null, geoAt = null;
 let outName = '', base = null, prev = null, snapNow = null, filterId = null, finalCache = null;
-const APP_VERSION = 'v2610.23';
+const APP_VERSION = 'v2610.24';
 const IS_GAS = typeof google !== 'undefined' && google.script && google.script.run;
 
 /* ---------- Local storage ---------- */
@@ -1427,6 +1427,47 @@ renderCamFilters();
 $('#shutter').onclick = capture;
 $('#flip').onclick = () => { facing = facing === 'user' ? 'environment' : 'user'; startCam(); };
 $('#retake').onclick = () => { if (updatePending) return location.reload(); $('#review').hidden = true; store.set('filter', 'auto'); renderCamFilters(); pickCamFilter('auto'); };
+/* Tez filter (Auto Save ke liye): phone ka apna graphics (SVG filter) – JS mein pixel-dar-pixel nahi */
+function quickFilter(src, p){
+  if (!p) return src;
+  if (p.autoFix) p = autoParams(src);
+  // Auto jaise saade (rang + roshni) filters hi; baaki ke liye poora tarika
+  const simple = !p.curves && !p.hsl && !p.lut3d && !p.match && !p.split && !p.green && !p.sky && !p.food && !p.aqua && !p.gray && !p.dark && !p.lift;
+  if (!simple || !('filter' in CanvasRenderingContext2D.prototype)) return applyFilter(src, p);
+  // safed-santulan (white balance) ke liye chhota namoona
+  const t = document.createElement('canvas'); t.width = 48; t.height = 36;
+  const tx = t.getContext('2d', { willReadFrequently:true }); tx.drawImage(src, 0, 0, 48, 36);
+  const d = tx.getImageData(0, 0, 48, 36).data;
+  let sr = 0, sg = 0, sb = 0, sy = 0, n = 0;
+  for (let i = 0; i < d.length; i += 4){ sr += d[i]; sg += d[i+1]; sb += d[i+2]; sy += .299*d[i] + .587*d[i+1] + .114*d[i+2]; n++; }
+  sr /= n; sg /= n; sb /= n; const m = (sr + sg + sb) / 3;
+  const gain = v => Math.min(1.15, Math.max(0.88, 0.65 + 0.35 * m / Math.max(v, 1)));
+  let gr = 1, gg = 1, gb = 1;
+  if (p.wb){ gr = 1 + p.wb * (gain(sr) - 1); gg = 1 + p.wb * (gain(sg) - 1); gb = 1 + p.wb * (gain(sb) - 1); }
+  let ex = p.exp || 1; const wm = p.warm || 0;
+  if (p.auto) ex *= Math.min(p.auto, Math.max(1, 120 / Math.max(1, sy / n)));
+  gr *= ex * (1 + wm); gg *= ex; gb *= ex * (1 - wm);
+  const bp = p.bp || 0, wp = p.wp || 255, hl = p.hl || 0, sh = p.sh || 0, con = p.con || 0;
+  const tone = y => { let v = Math.min(255, Math.max(0, (y - bp) * 255 / (wp - bp)));
+    if (v > 175) v = 175 + (v - 175) * (1 - hl); if (v < 60) v = v + (60 - v) * sh;
+    let u = v / 255; const s2 = u < .5 ? 2*u*u : 1 - 2*(1-u)*(1-u); return Math.min(1, Math.max(0, u * (1 - con) + s2 * con)); };
+  const table = g => { const a = []; for (let i = 0; i <= 16; i++) a.push(tone(Math.min(255, i * 16 * g)).toFixed(4)); return a.join(' '); };
+  // SVG filter (ek baar banao, har baar values badlo)
+  let svg = document.getElementById('qfSvg');
+  if (!svg){
+    svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.id = 'qfSvg'; svg.setAttribute('width', 0); svg.setAttribute('height', 0); svg.style.position = 'absolute';
+    svg.innerHTML = '<filter id="qf" color-interpolation-filters="sRGB"><feComponentTransfer><feFuncR id="qfR" type="table"/><feFuncG id="qfG" type="table"/><feFuncB id="qfB" type="table"/></feComponentTransfer><feColorMatrix id="qfS" type="saturate" values="1"/></filter>';
+    document.body.appendChild(svg);
+  }
+  document.getElementById('qfR').setAttribute('tableValues', table(gr));
+  document.getElementById('qfG').setAttribute('tableValues', table(gg));
+  document.getElementById('qfB').setAttribute('tableValues', table(gb));
+  document.getElementById('qfS').setAttribute('values', String(p.sat || 1));
+  const out = document.createElement('canvas'); out.width = src.width; out.height = src.height;
+  const ox = out.getContext('2d'); ox.filter = 'url(#qf)'; ox.drawImage(src, 0, 0); ox.filter = 'none';
+  return out;
+}
 /* Auto Save: koi review/filter screen nahi, gola nahi – photo seedha save, camera taiyaar */
 let quickN = 0;
 function quickSave(shot, tapTime){
@@ -1436,11 +1477,11 @@ function quickSave(shot, tapTime){
   LIVE.hold = (LIVE.hold || 0) + 1;              // save hote waqt live preview thoda ruke (phone ka poora zor save par)
   setTimeout(async () => {
     try{
-      const long = Math.max(shot.width, shot.height), s = Math.min(1, 2400 / long);
+      const long = Math.max(shot.width, shot.height), s = Math.min(1, 1600 / long);   // WhatsApp/report ke liye kaafi, aur tez
       const b = copyCanvas(shot, Math.round(shot.width * s), Math.round(shot.height * s), true);
       const f = FILTERS.find(q => q.id === store.get('filter', 'auto')) || FILTERS.find(q => q.id === 'auto');
-      const out = stamp(applyFilter(b, f.p), snap);
-      const blob = await new Promise(r => out.toBlob(r, 'image/jpeg', 0.92));
+      const out = stamp(quickFilter(b, f.p), snap);
+      const blob = await new Promise(r => out.toBlob(r, 'image/jpeg', 0.9));
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob); a.download = name;
       document.body.appendChild(a); a.click(); a.remove();
@@ -1448,7 +1489,7 @@ function quickSave(shot, tapTime){
       toast('Saved ✓', 1500);
     }catch(e){ toast('Could not save the photo. Please try again.'); }
     finally{ LIVE.hold = Math.max(0, LIVE.hold - 1); }
-  }, 30);   // flash dikhne ke baad kaam shuru
+  }, 0);
 }
 async function savePhoto(auto){
   const blob = await finalBlob(auto ? 'auto' : false);
