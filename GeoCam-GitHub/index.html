@@ -246,7 +246,7 @@ const $ = s => document.querySelector(s);
 const video = $('#video');
 let stream = null, facing = 'environment', pos = null, addr = null, geoAt = null;
 let outName = '', base = null, prev = null, snapNow = null, filterId = null, finalCache = null;
-const APP_VERSION = 'v2610.26';
+const APP_VERSION = 'v2610.27';
 const IS_GAS = typeof google !== 'undefined' && google.script && google.script.run;
 
 /* ---------- Local storage ---------- */
@@ -357,7 +357,12 @@ function startGPS(){
     if (e.code === 3) setTimeout(startGPS, 2000);   // timeout par dobara koshish
   }, { enableHighAccuracy:true, maximumAge:0, timeout:60000 });
 }
-$('#locRetry').onclick = () => { locBar('Checking location…'); startGPS(); };
+$('#locRetry').onclick = () => {
+  locBar('Checking location…');
+  // tap ke andar seedha GPS maango (kuch phones yahan 'Location ON karein?' popup dikhate hain)
+  try{ navigator.geolocation.getCurrentPosition(gotPos, gpsErr, { enableHighAccuracy:true, maximumAge:0, timeout:15000 }); }catch(e){}
+  startGPS();
+};
 // Location ON karke app par wapas aate hi dobara check
 document.addEventListener('visibilitychange', () => { if (!document.hidden && !pos) startGPS(); });
 $('#gps').addEventListener('click', () => { if (!pos) startGPS(); else openStartScreen(); });
@@ -1570,7 +1575,7 @@ async function askPermissions(){
   await new Promise(res => navigator.geolocation
     ? navigator.geolocation.getCurrentPosition(p => { gotPos(p); res(); },
         e => { if (e.code === 2) gpsIsOff = true; res(); },
-        { enableHighAccuracy:false, maximumAge:60000, timeout:15000 })
+        { enableHighAccuracy:true, maximumAge:0, timeout:15000 })
     : res());
   startGPS();
   $('#permBtn').disabled = false;
