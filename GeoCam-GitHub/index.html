@@ -77,6 +77,13 @@ video{width:100%;height:100%;object-fit:cover;background:#000}
   box-shadow:0 0 0 5px rgba(0,0,0,.35),0 0 0 9px var(--haldi);transition:transform .08s}
 .shutter:active{transform:scale(.92)}
 .spacer{width:52px;height:52px}
+.modes{position:relative;display:flex;justify-content:center;gap:8px}
+.mode{background:rgba(0,0,0,.45);border:0;color:#e6e6e6;font-weight:700;font-size:13px;letter-spacing:.5px;padding:6px 14px;border-radius:999px;cursor:pointer}
+.mode.on{background:var(--haldi);color:#000}
+.recTime{position:absolute;left:0;top:50%;transform:translateY(-50%);background:#e53935;color:#fff;font-weight:700;font-size:13px;border-radius:999px;padding:4px 10px}
+.shutter.video{background:#e53935}
+.shutter.rec{background:#e53935;border-radius:18px;transform:scale(.78)}
+.recording .camFilters,.recording .modes .mode,.recording #flip{visibility:hidden}
 
 .msg{position:absolute;left:20px;right:20px;top:35%;margin:0;padding:16px;border-radius:10px;
   background:var(--band);text-align:center;font-size:16px;line-height:1.45}
@@ -172,6 +179,11 @@ video{width:100%;height:100%;object-fit:cover;background:#000}
       <span class="liveBadge">GeoCam HD</span>
     </div>
     <div id="camFilters" class="camFilters" role="radiogroup" aria-label="Live filter"></div>
+    <div class="modes" role="tablist" aria-label="Camera mode">
+      <span id="recTime" class="recTime" hidden>● 00:00</span>
+      <button id="mPhoto" class="mode on" role="tab" aria-selected="true">PHOTO</button>
+      <button id="mVideo" class="mode" role="tab" aria-selected="false">VIDEO</button>
+    </div>
     <nav class="controls">
       <button id="flip" class="round" aria-label="Switch camera">
         <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 15.5-6.2L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.2L3 16"/><path d="M3 21v-5h5"/></svg>
@@ -246,7 +258,7 @@ const $ = s => document.querySelector(s);
 const video = $('#video');
 let stream = null, facing = 'environment', pos = null, addr = null, geoAt = null;
 let outName = '', base = null, prev = null, snapNow = null, filterId = null, finalCache = null;
-const APP_VERSION = 'v2610.27';
+const APP_VERSION = 'v2611.1';
 const IS_GAS = typeof google !== 'undefined' && google.script && google.script.run;
 
 /* ---------- Local storage ---------- */
@@ -1431,7 +1443,99 @@ if (liveInit()){
 renderCamFilters();
 
 /* ---------- Buttons ---------- */
-$('#shutter').onclick = capture;
+/* ---------- VIDEO: geotag ke saath video recording ---------- */
+let camMode = 'photo', REC = null;
+function setMode(m){
+  if (REC) return;
+  camMode = m;
+  $('#mPhoto').classList.toggle('on', m === 'photo'); $('#mPhoto').setAttribute('aria-selected', m === 'photo');
+  $('#mVideo').classList.toggle('on', m === 'video'); $('#mVideo').setAttribute('aria-selected', m === 'video');
+  $('#shutter').classList.toggle('video', m === 'video');
+  $('#shutter').setAttribute('aria-label', m === 'video' ? 'Start video' : 'Take photo');
+}
+$('#mPhoto').onclick = () => setMode('photo');
+$('#mVideo').onclick = () => setMode('video');
+function pickMime(){
+  // H.264 MP4 sabse pehle (WhatsApp/Gallery mein sab jagah chalta hai)
+  const list = ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4;codecs=avc1,mp4a.40.2', 'video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
+  if (!window.MediaRecorder) return '';
+  return list.find(t => { try{ return MediaRecorder.isTypeSupported(t); }catch(e){ return false; } }) || '';
+}
+async function startRec(){
+  if (!stream) return toast('Please start the camera first');
+  if (!pos){ startGPS(); return toast('Location is needed for the video. Turn on phone Location (GPS) and wait for the green GPS light.', 4500); }
+  const mime = pickMime();
+  if (!mime) return toast('Video recording is not supported on this phone');
+  const vw = video.videoWidth, vh = video.videoHeight;
+  const how = facing === 'user' ? ({ left:'right', right:'left' }[tilt] || tilt) : tilt;
+  const side = how === 'left' || how === 'right';
+  const sc = Math.min(1, 1280 / Math.max(vw, vh));
+  const W = Math.round((side ? vh : vw) * sc) & ~1, H = Math.round((side ? vw : vh) * sc) & ~1;
+  const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+  const x = cv.getContext('2d');
+  const blank = document.createElement('canvas'); blank.width = W; blank.height = H;
+  let overlay = null;
+  const refresh = () => { try{ overlay = stamp(blank, snapFrom(pos, new Date())); }catch(e){} };
+  refresh();
+  const draw = () => {
+    x.save();
+    if (how === 'left'){ x.translate(0, H); x.rotate(-Math.PI / 2); x.drawImage(video, 0, 0, H, W); }
+    else if (how === 'right'){ x.translate(W, 0); x.rotate(Math.PI / 2); x.drawImage(video, 0, 0, H, W); }
+    else if (how === 'upside'){ x.translate(W, H); x.rotate(Math.PI); x.drawImage(video, 0, 0, W, H); }
+    else x.drawImage(video, 0, 0, W, H);
+    x.restore();
+    if (overlay) x.drawImage(overlay, 0, 0);
+  };
+  draw();
+  const out = cv.captureStream(25);
+  let mic = null;
+  try{ mic = await navigator.mediaDevices.getUserMedia({ audio:true }); mic.getAudioTracks().forEach(t => out.addTrack(t)); }
+  catch(e){ toast('Microphone not allowed: video will be saved without sound', 3500); }
+  let rec;
+  try{ rec = new MediaRecorder(out, { mimeType: mime, videoBitsPerSecond: 4000000 }); }
+  catch(e){ if (mic) mic.getTracks().forEach(t => t.stop()); return toast('Could not start video recording'); }
+  const chunks = [], t0 = Date.now(), start = new Date();
+  rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+  rec.onstop = () => {
+    const ext = mime.includes('mp4') ? 'mp4' : 'webm';
+    const blob = new Blob(chunks, { type: mime.split(';')[0] });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = `GeoCam_VID_${fmt(start).file}.${ext}`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 8000);
+    toast('Video saved ✓ (Downloads)', 2500);
+  };
+  REC = {
+    rec, mic,
+    drawT: setInterval(draw, 40),
+    ovT: setInterval(refresh, 1000),
+    clockT: setInterval(() => {
+      const s = Math.floor((Date.now() - t0) / 1000);
+      $('#recTime').textContent = `● ${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+      if (s >= 600) stopRec();   // 10 minute tak
+    }, 500)
+  };
+  rec.start(1000);
+  LIVE.hold = (LIVE.hold || 0) + 1; $('#cam').classList.add('saving');   // recording ke waqt seedha camera (phone halka chale)
+  document.body.classList.add('recording');
+  $('#shutter').classList.add('rec'); $('#shutter').setAttribute('aria-label', 'Stop video');
+  $('#recTime').hidden = false; $('#recTime').textContent = '● 00:00';
+  try{ if (navigator.vibrate) navigator.vibrate(40); }catch(e){}
+}
+function stopRec(){
+  if (!REC) return;
+  const r = REC; REC = null;
+  clearInterval(r.drawT); clearInterval(r.ovT); clearInterval(r.clockT);
+  try{ r.rec.stop(); }catch(e){}
+  if (r.mic) r.mic.getTracks().forEach(t => t.stop());
+  LIVE.hold = Math.max(0, (LIVE.hold || 1) - 1); if (!LIVE.hold) $('#cam').classList.remove('saving');
+  document.body.classList.remove('recording');
+  $('#shutter').classList.remove('rec'); $('#shutter').setAttribute('aria-label', 'Start video');
+  $('#recTime').hidden = true;
+  try{ if (navigator.vibrate) navigator.vibrate([30, 60, 30]); }catch(e){}
+}
+document.addEventListener('visibilitychange', () => { if (document.hidden && REC) stopRec(); });
+$('#shutter').onclick = () => { if (camMode === 'video') (REC ? stopRec() : startRec()); else capture(); };
 $('#flip').onclick = () => { facing = facing === 'user' ? 'environment' : 'user'; startCam(); };
 $('#retake').onclick = () => { if (updatePending) return location.reload(); $('#review').hidden = true; store.set('filter', 'auto'); renderCamFilters(); pickCamFilter('auto'); };
 /* Tez filter (Auto Save ke liye): phone ka apna graphics (SVG filter) – JS mein pixel-dar-pixel nahi */
