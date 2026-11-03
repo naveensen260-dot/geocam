@@ -258,7 +258,7 @@ const $ = s => document.querySelector(s);
 const video = $('#video');
 let stream = null, facing = 'environment', pos = null, addr = null, geoAt = null;
 let outName = '', base = null, prev = null, snapNow = null, filterId = null, finalCache = null;
-const APP_VERSION = 'v2611.1';
+const APP_VERSION = 'v2611.2';
 const IS_GAS = typeof google !== 'undefined' && google.script && google.script.run;
 
 /* ---------- Local storage ---------- */
@@ -1473,9 +1473,13 @@ async function startRec(){
   const W = Math.round((side ? vh : vw) * sc) & ~1, H = Math.round((side ? vw : vh) * sc) & ~1;
   const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
   const x = cv.getContext('2d');
-  const blank = document.createElement('canvas'); blank.width = W; blank.height = H;
-  let overlay = null;
-  const refresh = () => { try{ overlay = stamp(blank, snapFrom(pos, new Date())); }catch(e){} };
+  // map card do roop mein: seedha (W×H) aur ghooma hua (H×W) – phone ghoomne par card usi taraf
+  const blankN = document.createElement('canvas'); blankN.width = W; blankN.height = H;
+  const blankS = document.createElement('canvas'); blankS.width = H; blankS.height = W;
+  let ovN = null, ovS = null;
+  const refresh = () => { try{ const sn = snapFrom(pos, new Date()); ovN = stamp(blankN, sn); ovS = stamp(blankS, sn); }catch(e){} };
+  const deg = h => ({ portrait:0, left:-90, right:90, upside:180 }[h] || 0);
+  const nowHow = () => facing === 'user' ? ({ left:'right', right:'left' }[tilt] || tilt) : tilt;
   refresh();
   const draw = () => {
     x.save();
@@ -1484,7 +1488,14 @@ async function startRec(){
     else if (how === 'upside'){ x.translate(W, H); x.rotate(Math.PI); x.drawImage(video, 0, 0, W, H); }
     else x.drawImage(video, 0, 0, W, H);
     x.restore();
-    if (overlay) x.drawImage(overlay, 0, 0);
+    // phone ab kis taraf hai? card ko usi hisaab se ghumao
+    let r = (deg(how) - deg(nowHow()) + 360) % 360;
+    x.save();
+    if (r === 0){ if (ovN) x.drawImage(ovN, 0, 0); }
+    else if (r === 180){ x.translate(W, H); x.rotate(Math.PI); if (ovN) x.drawImage(ovN, 0, 0); }
+    else if (r === 90){ x.translate(W, 0); x.rotate(Math.PI / 2); if (ovS) x.drawImage(ovS, 0, 0); }
+    else { x.translate(0, H); x.rotate(-Math.PI / 2); if (ovS) x.drawImage(ovS, 0, 0); }
+    x.restore();
   };
   draw();
   const out = cv.captureStream(25);
