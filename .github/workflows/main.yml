@@ -33,7 +33,7 @@ jobs:
 
       - name: Android project banana
         run: |
-          mkdir -p twa/app/src/main/res/mipmap-xxxhdpi twa/app/src/main/res/values
+          mkdir -p twa/app/src/main/res/mipmap-xxxhdpi twa/app/src/main/res/values twa/app/src/main/java/io/github/naveensen260dot/geocam
           ICON=$(find . -path ./twa -prune -o -name 'icon-512.png' -print | head -n 1)
           cp "$ICON" twa/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
 
@@ -65,6 +65,20 @@ jobs:
                   versionCode ${{ github.run_number }}
                   versionName '1.${{ github.run_number }}'
               }
+              signingConfigs {
+                  release {
+                      storeFile file(System.getenv('KS_PATH'))
+                      storePassword System.getenv('KS_PASS')
+                      keyAlias 'geocam'
+                      keyPassword System.getenv('KS_PASS')
+                  }
+              }
+              buildTypes {
+                  release {
+                      minifyEnabled false
+                      signingConfig signingConfigs.release
+                  }
+              }
               compileOptions {
                   sourceCompatibility JavaVersion.VERSION_1_8
                   targetCompatibility JavaVersion.VERSION_1_8
@@ -72,6 +86,8 @@ jobs:
           }
           dependencies {
               implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.5.0'
+              implementation 'com.google.android.gms:play-services-location:21.3.0'
+              implementation platform('org.jetbrains.kotlin:kotlin-bom:1.8.22')
           }
           GRADLE
 
@@ -79,6 +95,7 @@ jobs:
           <resources>
               <string name="app_name">${APP_NAME}</string>
               <color name="ink">#121a16</color>
+              <string name="asset_statements">[{\"relation\": [\"delegate_permission/common.handle_all_urls\"], \"target\": {\"namespace\": \"web\", \"site\": \"https://naveensen260-dot.github.io\"}}]</string>
           </resources>
           XML
 
@@ -90,6 +107,7 @@ jobs:
                   android:icon="@mipmap/ic_launcher"
                   android:label="@string/app_name"
                   android:theme="@android:style/Theme.Translucent.NoTitleBar">
+                  <meta-data android:name="asset_statements" android:resource="@string/asset_statements" />
                   <activity
                       android:name="com.google.androidbrowserhelper.trusted.LauncherActivity"
                       android:label="@string/app_name"
@@ -107,16 +125,89 @@ jobs:
                           <category android:name="android.intent.category.LAUNCHER" />
                       </intent-filter>
                   </activity>
+                  <!-- Ek tap mein phone ki Location ON karne wala Google popup (geocam://location) -->
+                  <activity
+                      android:name=".EnableLocationActivity"
+                      android:exported="true"
+                      android:excludeFromRecents="true"
+                      android:theme="@android:style/Theme.Translucent.NoTitleBar">
+                      <intent-filter>
+                          <action android:name="android.intent.action.VIEW" />
+                          <category android:name="android.intent.category.DEFAULT" />
+                          <category android:name="android.intent.category.BROWSABLE" />
+                          <data android:scheme="geocam" android:host="location" />
+                      </intent-filter>
+                  </activity>
               </application>
           </manifest>
           XML
 
+          cat > twa/app/src/main/java/io/github/naveensen260dot/geocam/EnableLocationActivity.java <<'JAVA'
+          package io.github.naveensen260dot.geocam;
+
+          import android.app.Activity;
+          import android.content.Intent;
+          import android.content.IntentSender;
+          import android.os.Bundle;
+          import android.provider.Settings;
+          import com.google.android.gms.common.api.ResolvableApiException;
+          import com.google.android.gms.location.LocationRequest;
+          import com.google.android.gms.location.LocationServices;
+          import com.google.android.gms.location.LocationSettingsRequest;
+          import com.google.android.gms.location.Priority;
+
+          /** GeoCam ke popup se khulta hai: Google ka "Turn on device location?" dabba dikhata hai, phir wapas app. */
+          public class EnableLocationActivity extends Activity {
+              private static final int REQ = 7;
+
+              @Override
+              protected void onCreate(Bundle saved) {
+                  super.onCreate(saved);
+                  LocationRequest req = new LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1000).build();
+                  LocationSettingsRequest settings = new LocationSettingsRequest.Builder()
+                          .addLocationRequest(req).setAlwaysShow(true).build();
+                  LocationServices.getSettingsClient(this).checkLocationSettings(settings)
+                          .addOnSuccessListener(this, r -> finish())
+                          .addOnFailureListener(this, e -> {
+                              if (e instanceof ResolvableApiException) {
+                                  try {
+                                      ((ResolvableApiException) e).startResolutionForResult(this, REQ);
+                                      return;
+                                  } catch (IntentSender.SendIntentException ignored) { }
+                              }
+                              openSettings();
+                          });
+              }
+
+              private void openSettings() {
+                  try { startActivity(new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)); } catch (Exception ignored) { }
+                  finish();
+              }
+
+              @Override
+              protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+                  super.onActivityResult(requestCode, resultCode, data);
+                  finish();
+              }
+          }
+          JAVA
+
+      - name: Signing key taiyaar karna
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then echo "KEYSTORE_BASE64 secret nahi mila – Settings > Secrets mein daalein"; exit 1; fi
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/geocam.jks"
+
       - name: APK build karna
         working-directory: twa
-        run: gradle assembleDebug --no-daemon
+        env:
+          KS_PATH: ${{ runner.temp }}/geocam.jks
+          KS_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: gradle assembleRelease --no-daemon
 
       - name: APK ka naam badalna
-        run: cp twa/app/build/outputs/apk/debug/app-debug.apk GeoCam-HD.apk
+        run: cp twa/app/build/outputs/apk/release/app-release.apk GeoCam-HD.apk
 
       # APK seedha "Releases" mein .apk file ki tarah aayegi (zip/rar nahi)
       - uses: softprops/action-gh-release@v2
