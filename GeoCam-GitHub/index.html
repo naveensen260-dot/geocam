@@ -278,7 +278,7 @@ const $ = s => document.querySelector(s);
 const video = $('#video');
 let stream = null, facing = 'environment', pos = null, addr = null, geoAt = null;
 let outName = '', base = null, prev = null, snapNow = null, filterId = null, finalCache = null;
-const APP_VERSION = 'v2611.4';
+const APP_VERSION = 'v2611.5';
 const IS_GAS = typeof google !== 'undefined' && google.script && google.script.run;
 
 /* ---------- Local storage ---------- */
@@ -379,6 +379,19 @@ function nativeLocationOn(){
   const back = encodeURIComponent(location.href.split('#')[0]);
   location.href = `intent://location#Intent;scheme=geocam;package=${APK_PKG};S.browser_fallback_url=${back};end`;
 }
+/* Location ON hote hi turant pakdo: har 0.7 sec chhoti jaanch (20 sec tak) */
+let fastPollT = null;
+function fastGpsPoll(){
+  clearInterval(fastPollT);
+  const t0 = Date.now();
+  fastPollT = setInterval(() => {
+    if (pos || Date.now() - t0 > 20000){ clearInterval(fastPollT); return; }
+    try{
+      navigator.geolocation.getCurrentPosition(p => { const first = !pos; gotPos(p); if (first) startGPS(); clearInterval(fastPollT); },
+        () => {}, { enableHighAccuracy:false, maximumAge:0, timeout:2500 });
+    }catch(e){}
+  }, 700);
+}
 function askLocationOn(){
   // tap ke andar poori-sateek GPS maango: kai phones yahin 'Turn on location?' dikha dete hain
   setChip('wait', 'Turning on GPS…');
@@ -403,7 +416,7 @@ function gpsErr(e){
     locBar('Location is off. Turn on phone Location (GPS) to take photos.');
     gpsIsOff = true; if (!$('#perm').hidden) showPermScreen();
     if ($('#perm').hidden && !document.hidden && (!locPopShown || !$('#locPop').hidden)) locPop(true);
-    clearTimeout(gpsRetry); gpsRetry = setTimeout(startGPS, 4000);   // ON karte hi apne aap pakad lega
+    clearTimeout(gpsRetry); gpsRetry = setTimeout(startGPS, 2000);   // ON karte hi apne aap pakad lega
   } else {
     setChip('weak', 'Finding GPS…');
     $('#liveAddr').textContent = 'Finding GPS… Move to an open area or near a window.';
@@ -421,7 +434,11 @@ function startGPS(){
     if (e.code === 3) setTimeout(startGPS, 2000);   // timeout par dobara koshish
   }, { enableHighAccuracy:true, maximumAge:0, timeout:60000 });
 }
-$('#lpOn').onclick = () => { locPop(false); if (inApk()) nativeLocationOn(); askLocationOn(); };
+$('#lpOn').onclick = () => {
+  locPop(false); setChip('wait', 'Turning on GPS…');
+  if (inApk()){ nativeLocationOn(); fastGpsPoll(); }   // APK: Google ka dabba; wapas aate hi turant GPS
+  else { askLocationOn(); fastGpsPoll(); }
+};
 $('#locPop').addEventListener('click', e => { if (e.target.id === 'locPop') locPop(false); });
 $('#locRetry').onclick = () => {
   if (gpsIsOff){ locPop(true); return; }
