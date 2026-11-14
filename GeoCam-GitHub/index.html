@@ -278,7 +278,7 @@ const $ = s => document.querySelector(s);
 const video = $('#video');
 let stream = null, facing = 'environment', pos = null, addr = null, geoAt = null;
 let outName = '', base = null, prev = null, snapNow = null, filterId = null, finalCache = null;
-const APP_VERSION = 'v2611.8';
+const APP_VERSION = 'v2611.9';
 const IS_GAS = typeof google !== 'undefined' && google.script && google.script.run;
 
 /* ---------- Local storage ---------- */
@@ -322,6 +322,33 @@ function setNet(){
 addEventListener('online', setNet); addEventListener('offline', setNet);
 
 /* ---------- Camera ---------- */
+/* Camera atak jaaye (doosre app/popup se wapas aane par) to apne aap dobara chalu */
+let camStartBusy = false, camLastT = -1, camStill = 0;
+async function resumeCam(why){
+  if (camStartBusy || REC || document.hidden || !$('#review').hidden) return;
+  camStartBusy = true;
+  try{ await startCam(); }finally{ camStartBusy = false; camStill = 0; camLastT = -1; }
+}
+function camAlive(){
+  if (!stream) return false;
+  const t = stream.getVideoTracks()[0];
+  return !!t && t.readyState === 'live';
+}
+setInterval(() => {
+  if (document.hidden || !$('#review').hidden || REC || camStartBusy) return;
+  if (!stream || Date.now() - (window.camStartedAt || 0) < 4000) return;   // shuru ke 4 sec chhod do
+  if (!camAlive()){ resumeCam('ended'); return; }
+  if (video.paused){ video.play().catch(() => {}); }
+  // tasveer ruki hui? (currentTime aage nahi badh raha)
+  if (video.currentTime === camLastT){ if (++camStill >= 4) resumeCam('stalled'); }
+  else { camStill = 0; camLastT = video.currentTime; }
+}, 800);
+['visibilitychange', 'focus', 'pageshow'].forEach(ev => (ev === 'visibilitychange' ? document : window).addEventListener(ev, () => {
+  if (document.hidden) return;
+  if (stream && !camAlive()) resumeCam(ev);
+  else if (video.paused) video.play().catch(() => {});
+  if (!pos && typeof startGPS === 'function') setTimeout(startGPS, 200);
+}));
 async function startCam(){
   if (stream) stream.getTracks().forEach(t => t.stop());
   stream = null;
@@ -332,7 +359,7 @@ async function startCam(){
     stream = await navigator.mediaDevices.getUserMedia({
       audio:false, video:{ facingMode:{ ideal:facing }, width:{ ideal:1920 }, height:{ ideal:1440 } }
     });
-    video.srcObject = stream;
+    video.srcObject = stream; window.camStartedAt = Date.now();
     if (LIVE.gl) setTimeout(liveStart, 300);
     video.classList.toggle('mirror', facing === 'user');
     $('#liveCv').classList.toggle('mirror', facing === 'user');
