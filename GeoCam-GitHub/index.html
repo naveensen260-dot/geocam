@@ -253,7 +253,7 @@ video{width:100%;height:100%;object-fit:cover;background:#000}
 const THEMES = [
   // sab mein kaala background; sirf khaas rang (accent) badalta hai
   { name:'Blue',   acc:'#2ec4c8' },
-  { name:'Gold',   acc:'#e9b949' },
+  { name:'Indigo', acc:'#818cf8' },
   { name:'Green',  acc:'#8bd450' },
   { name:'Orange', acc:'#ff9f45' },
   { name:'Pink',   acc:'#ff6fae' },
@@ -278,7 +278,7 @@ const $ = s => document.querySelector(s);
 const video = $('#video');
 let stream = null, facing = 'environment', pos = null, addr = null, geoAt = null;
 let outName = '', base = null, prev = null, snapNow = null, filterId = null, finalCache = null;
-const APP_VERSION = 'v2611.5';
+const APP_VERSION = 'v2611.6';
 const IS_GAS = typeof google !== 'undefined' && google.script && google.script.run;
 
 /* ---------- Local storage ---------- */
