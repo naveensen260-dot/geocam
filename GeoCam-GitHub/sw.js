@@ -1,6 +1,6 @@
 // GeoCam HD service worker
 // App (index.html) hamesha pehle internet se naya liya jaata hai; net na ho to phone mein rakha version chalta hai.
-const CACHE = 'geocam-v8';
+const CACHE = 'geocam-v9';
 const LOCAL = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {

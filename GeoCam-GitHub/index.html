@@ -77,6 +77,16 @@ video{width:100%;height:100%;object-fit:cover;background:#000}
   box-shadow:0 0 0 5px rgba(0,0,0,.35),0 0 0 9px var(--haldi);transition:transform .08s}
 .shutter:active{transform:scale(.92)}
 .spacer{width:52px;height:52px}
+.locpop{position:fixed;inset:0;z-index:7;background:rgba(0,0,0,.6);display:grid;place-items:center;padding:24px}
+.locpop[hidden]{display:none}
+.lpbox{width:100%;max-width:340px;background:#fff;color:#111;border-radius:22px;padding:22px 20px 16px;text-align:center}
+.lpicon{font-size:34px;line-height:1}
+.lpbox h2{margin:8px 0 6px;font-size:20px}
+.lpbox p{margin:0 0 16px;font-size:14px;color:#444;line-height:1.45}
+.lpbtn{width:100%;border:0;border-radius:12px;padding:14px;font-size:16px;font-weight:700;background:var(--haldi);color:#000;cursor:pointer}
+.lplink{display:block;margin:12px 0 8px;color:#1a73e8;font-weight:700;font-size:14px;text-decoration:none}
+.lpbox small{display:block;color:#666;font-size:12px;line-height:1.4}
+.gpswarn{color:#ffcf6b}
 .modes{position:relative;display:flex;justify-content:center;gap:8px}
 .mode{background:rgba(0,0,0,.45);border:0;color:#e6e6e6;font-weight:700;font-size:13px;letter-spacing:.5px;padding:6px 14px;border-radius:999px;cursor:pointer}
 .mode.on{background:var(--haldi);color:#000}
@@ -158,6 +168,16 @@ video{width:100%;height:100%;object-fit:cover;background:#000}
   <p id="camMsg" class="msg" hidden></p>
   <div class="topwrap">
     <div id="offBar" class="offbar" role="alert" hidden>You are offline: address will not be added, all other details will</div>
+    <div id="locPop" class="locpop" role="dialog" aria-modal="true" aria-labelledby="locPopT" hidden>
+      <div class="lpbox">
+        <div class="lpicon" aria-hidden="true">📍</div>
+        <h2 id="locPopT">Turn on Location</h2>
+        <p>Phone Location (GPS) is off. Turn it on to stamp the correct place on your photo.</p>
+        <button id="lpOn" class="lpbtn">Turn on Location</button>
+        <a id="lpSet" class="lplink" href="intent:#Intent;action=android.settings.LOCATION_SOURCE_SETTINGS;end">Open Location settings</a>
+        <small>Or pull down the notification bar and tap <b>Location</b>.</small>
+      </div>
+    </div>
     <div id="locBar" class="locbar" role="alert" hidden>
       <span id="locTxt">Location is off. Turn on phone Location (GPS) to take photos.</span>
       <button id="locRetry">Try again</button>
@@ -258,7 +278,7 @@ const $ = s => document.querySelector(s);
 const video = $('#video');
 let stream = null, facing = 'environment', pos = null, addr = null, geoAt = null;
 let outName = '', base = null, prev = null, snapNow = null, filterId = null, finalCache = null;
-const APP_VERSION = 'v2611.2';
+const APP_VERSION = 'v2611.4';
 const IS_GAS = typeof google !== 'undefined' && google.script && google.script.run;
 
 /* ---------- Local storage ---------- */
@@ -325,16 +345,46 @@ async function startCam(){
 /* ---------- GPS ---------- */
 function setChip(state, text){ $('#gps').dataset.state = state; $('#gpsTxt').textContent = text; }
 let gpsWatch = null;
-function gotPos(p){
-  // pehle aayi kam-sahi location ko baad wali zyada-sahi location badal deti hai
-  if (pos && p.coords.accuracy > pos.coords.accuracy * 1.5 && (p.timestamp - pos.timestamp) < 60000) return;
-  pos = p; gpsIsOff = false; clearTimeout(gpsRetry); locBar('');
+function gotPos(p0){
+  // saada copy (asli GeolocationPosition ki values copy nahi hotin)
+  const c0 = p0.coords;
+  const p = { timestamp: p0.timestamp || Date.now(), coords: { latitude: c0.latitude, longitude: c0.longitude, accuracy: c0.accuracy,
+    altitude: c0.altitude, altitudeAccuracy: c0.altitudeAccuracy, heading: c0.heading, speed: c0.speed } };
+  // Sthir location: naya fix purane ke ghere ke andar hai aur kam sahi hai to purana (zyada sahi) rakho.
+  // Isse dukaan ke andar/bahar jaise jagah par location idhar-udhar nahi uchhalti.
+  if (pos){
+    const age = p.timestamp - pos.timestamp, a0 = pos.coords.accuracy, a1 = p.coords.accuracy;
+    const d = distM([pos.coords.latitude, pos.coords.longitude], [p.coords.latitude, p.coords.longitude]);
+    const inside = d <= Math.max(25, a0 + a1);          // dono ek hi jagah ke andar
+    if (a1 > a0 && inside && age < 120000) { pos.timestamp = p.timestamp; return; }   // purana sahi fix hi rakho
+  }
+  pos = p; gpsIsOff = false; clearTimeout(gpsRetry); locBar(''); locPop(false);
   if (!$('#perm').hidden){ refreshPerm(); readyCheck(); }
   const acc = Math.round(p.coords.accuracy);
-  setChip(acc <= 30 ? 'ok' : 'weak', `GPS ±${acc} m`);
+  setChip(acc <= 30 ? 'ok' : 'weak', acc > 60 ? `Weak GPS ±${acc} m` : `GPS ±${acc} m`);
   renderLive(); maybeGeocode(); prefetchMap();
 }
 let gpsRetry = null;
+let locPopShown = false;
+function locPop(show){
+  $('#locPop').hidden = !show;
+  if (show) locPopShown = true;
+}
+/* GeoCam APK (Android app) ke andar chal raha hai? to Google ka asli "Location ON" dabba khul sakta hai */
+const APK_PKG = 'io.github.naveensen260dot.geocam';
+try{ if ((document.referrer || '').indexOf('android-app://' + APK_PKG) === 0) localStorage.setItem('geocam.inApk', '1'); }catch(e){}
+function inApk(){ try{ return localStorage.getItem('geocam.inApk') === '1' && /Android/i.test(navigator.userAgent); }catch(e){ return false; } }
+function nativeLocationOn(){
+  // geocam://location -> app ka chhota hissa Google ka "Turn on device location?" dikhata hai (ek tap: OK)
+  const back = encodeURIComponent(location.href.split('#')[0]);
+  location.href = `intent://location#Intent;scheme=geocam;package=${APK_PKG};S.browser_fallback_url=${back};end`;
+}
+function askLocationOn(){
+  // tap ke andar poori-sateek GPS maango: kai phones yahin 'Turn on location?' dikha dete hain
+  setChip('wait', 'Turning on GPS…');
+  try{ navigator.geolocation.getCurrentPosition(gotPos, gpsErr, { enableHighAccuracy:true, maximumAge:0, timeout:12000 }); }catch(e){}
+  startGPS();
+}
 function locBar(text){
   $('#locBar').hidden = !text;
   if (text) $('#locTxt').textContent = text;
@@ -352,6 +402,7 @@ function gpsErr(e){
     $('#liveAddr').textContent = 'Phone Location (GPS) is off.';
     locBar('Location is off. Turn on phone Location (GPS) to take photos.');
     gpsIsOff = true; if (!$('#perm').hidden) showPermScreen();
+    if ($('#perm').hidden && !document.hidden && (!locPopShown || !$('#locPop').hidden)) locPop(true);
     clearTimeout(gpsRetry); gpsRetry = setTimeout(startGPS, 4000);   // ON karte hi apne aap pakad lega
   } else {
     setChip('weak', 'Finding GPS…');
@@ -364,12 +415,16 @@ function startGPS(){
   if (!pos) setChip('wait', 'Finding GPS…');
   // 1) jaldi wali location (network/WiFi se), 2) phir lagataar sahi GPS
   navigator.geolocation.getCurrentPosition(gotPos, gpsErr, { enableHighAccuracy:false, maximumAge:60000, timeout:15000 });
+  navigator.geolocation.getCurrentPosition(gotPos, () => {}, { enableHighAccuracy:true, maximumAge:5000, timeout:20000 });
   gpsWatch = navigator.geolocation.watchPosition(gotPos, e => {
     gpsErr(e);
     if (e.code === 3) setTimeout(startGPS, 2000);   // timeout par dobara koshish
   }, { enableHighAccuracy:true, maximumAge:0, timeout:60000 });
 }
+$('#lpOn').onclick = () => { locPop(false); if (inApk()) nativeLocationOn(); askLocationOn(); };
+$('#locPop').addEventListener('click', e => { if (e.target.id === 'locPop') locPop(false); });
 $('#locRetry').onclick = () => {
+  if (gpsIsOff){ locPop(true); return; }
   locBar('Checking location…');
   // tap ke andar seedha GPS maango (kuch phones yahan 'Location ON karein?' popup dikhate hain)
   try{ navigator.geolocation.getCurrentPosition(gotPos, gpsErr, { enableHighAccuracy:true, maximumAge:0, timeout:15000 }); }catch(e){}
@@ -424,7 +479,7 @@ async function olaPlace(la, lo){
 async function maybeGeocode(){
   if (!pos || !navigator.onLine || maybeGeocode.busy) return;
   const la = pos.coords.latitude, lo = pos.coords.longitude;
-  if (geoAt && distM(geoAt, [la, lo]) < 100) return;
+  if (geoAt && distM(geoAt, [la, lo]) < Math.max(100, Math.min(400, pos.coords.accuracy * 1.5))) return;   // GPS ki halki hilne par naam na badle
   maybeGeocode.busy = true;
   try{
     // Ola Maps aur OpenStreetMap dono ek saath (jaldi)
@@ -683,7 +738,7 @@ async function checkNewVersion(){
     }
   }catch(e){}
 }
-document.addEventListener('visibilitychange', () => { if (!document.hidden) setTimeout(checkNewVersion, 800); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden){ setTimeout(checkNewVersion, 800); if (!pos && typeof startGPS === 'function') setTimeout(startGPS, 300); } });
 setTimeout(checkNewVersion, 4000);
 
 /* Auto ✨: har photo ko jaanch kar uske hisaab se sudhaar */
@@ -1677,8 +1732,12 @@ function readyCheck(){
   return false;
 }
 async function showPermScreen(){
-  $('#perm').hidden = false;
   const st = await refreshPerm();
+  // ijaazat mil chuki hai, sirf phone ki Location band hai: badi screen nahi, chhota popup
+  if (stream && st.cam === 'granted' && st.loc === 'granted' && gpsIsOff && !pos && !startManual){
+    $('#perm').hidden = true; locPop(true); return;
+  }
+  $('#perm').hidden = false; locPop(false);
   if (st.cam === 'denied' || st.loc === 'denied') permHelp(DENIED_HELP);
   else if (gpsIsOff && !pos) permHelp(GPS_OFF_HELP);
   else permHelp('');
