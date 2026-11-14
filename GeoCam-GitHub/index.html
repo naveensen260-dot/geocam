@@ -278,7 +278,7 @@ const $ = s => document.querySelector(s);
 const video = $('#video');
 let stream = null, facing = 'environment', pos = null, addr = null, geoAt = null;
 let outName = '', base = null, prev = null, snapNow = null, filterId = null, finalCache = null;
-const APP_VERSION = 'v2611.6';
+const APP_VERSION = 'v2611.8';
 const IS_GAS = typeof google !== 'undefined' && google.script && google.script.run;
 
 /* ---------- Local storage ---------- */
@@ -1740,6 +1740,7 @@ async function refreshPerm(){
 }
 function permHelp(t){ $('#permHelp').textContent = t || ''; $('#permHelp').hidden = !t; }
 const DENIED_HELP = 'Permission is blocked. To turn it on:\n1. Open Chrome → ⋮ → Settings → Site settings\n2. In "Camera" and "Location", choose naveensen260-dot.github.io → Allow\n3. Phone Settings → Apps → Chrome → Permissions → allow Camera and Location\n4. Close GeoCam and open it again';
+const BLOCKED_HELP = 'The permission popup did not open (Chrome blocks it for a while after it is closed a few times). To fix:\n1. Open Chrome → ⋮ → Settings → Site settings → All sites\n2. Tap naveensen260-dot.github.io → "Clear & reset"\n3. Close GeoCam fully and open it again, then tap "Allow" on both popups';
 const GPS_OFF_HELP = 'Phone Location (GPS) is off. Pull down the notification bar and turn on "Location". The app will continue by itself.';
 
 /* Camera aur GPS dono taiyaar? tabhi permission screen hate */
@@ -1755,22 +1756,40 @@ async function showPermScreen(){
     $('#perm').hidden = true; locPop(true); return;
   }
   $('#perm').hidden = false; locPop(false);
+  if (permBlocked && !(st.cam === 'granted' && st.loc === 'granted')){ permHelp(BLOCKED_HELP); return; }
   if (st.cam === 'denied' || st.loc === 'denied') permHelp(DENIED_HELP);
   else if (gpsIsOff && !pos) permHelp(GPS_OFF_HELP);
   else permHelp('');
 }
 
+let askBusy = false, permBlocked = false;
 async function askPermissions(){
-  $('#permBtn').disabled = true; permHelp('');
-  if (!stream) await startCam();
-  await new Promise(res => navigator.geolocation
-    ? navigator.geolocation.getCurrentPosition(p => { gotPos(p); res(); },
-        e => { if (e.code === 2) gpsIsOff = true; res(); },
-        { enableHighAccuracy:true, maximumAge:0, timeout:15000 })
-    : res());
+  if (askBusy) return;                     // do baar dabane par do popup aapas mein na takraayein
+  askBusy = true; $('#permBtn').disabled = true; permHelp('');
+  try{ localStorage.setItem('geocam.askedOnce', '1'); }catch(e){}
+  let quickNo = false;                      // popup dikhe bina turant 'mana' = Chrome ne popup rok diya
+  if (!stream){
+    const t0 = Date.now(); await startCam();
+    if (!stream && Date.now() - t0 < 600 && await permState('camera') === 'prompt') quickNo = true;
+  }
+  await new Promise(res => {
+    if (!navigator.geolocation) return res();
+    const t0 = Date.now();
+    navigator.geolocation.getCurrentPosition(p => { gotPos(p); res(); },
+      async e => {
+        if (e.code === 2) gpsIsOff = true;
+        if (e.code === 1 && Date.now() - t0 < 600 && await permState('geolocation') === 'prompt') quickNo = true;
+        res();
+      }, { enableHighAccuracy:true, maximumAge:0, timeout:15000 });
+  });
   startGPS();
-  $('#permBtn').disabled = false;
-  if (!readyCheck()) showPermScreen();
+  askBusy = false; $('#permBtn').disabled = false;
+  if (readyCheck()) return;
+  const st = await refreshPerm();
+  permBlocked = quickNo;
+  if (quickNo){ $('#perm').hidden = false; permHelp(BLOCKED_HELP); return; }
+  if (st.cam === 'granted' && st.loc === 'granted' && gpsIsOff && !pos && inApk()){ nativeLocationOn(); fastGpsPoll(); return; }
+  showPermScreen();
 }
 
 async function initPerms(){
@@ -1782,7 +1801,10 @@ async function initPerms(){
   } else {
     $('#perm').hidden = false;
     if (st.cam === 'denied' || st.loc === 'denied') permHelp(DENIED_HELP);
-    else askPermissions();   // pehli baar: khulte hi ijaazat ka popup
+    else {
+      let first = true; try{ first = !localStorage.getItem('geocam.askedOnce'); }catch(e){}
+      if (first) askPermissions();   // sirf pehli baar apne aap popup; baad mein "Allow access" dabane par
+    }
   }
   for (const n of ['camera', 'geolocation']){
     try{
