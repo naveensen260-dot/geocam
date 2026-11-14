@@ -278,7 +278,7 @@ const $ = s => document.querySelector(s);
 const video = $('#video');
 let stream = null, facing = 'environment', pos = null, addr = null, geoAt = null;
 let outName = '', base = null, prev = null, snapNow = null, filterId = null, finalCache = null;
-const APP_VERSION = 'v2611.9';
+const APP_VERSION = 'v2611.10';
 const IS_GAS = typeof google !== 'undefined' && google.script && google.script.run;
 
 /* ---------- Local storage ---------- */
@@ -442,7 +442,7 @@ function gpsErr(e){
     $('#liveAddr').textContent = 'Phone Location (GPS) is off.';
     locBar('Location is off. Turn on phone Location (GPS) to take photos.');
     gpsIsOff = true; if (!$('#perm').hidden) showPermScreen();
-    if ($('#perm').hidden && !document.hidden && (!locPopShown || !$('#locPop').hidden)) locPop(true);
+    if ($('#perm').hidden && !startManual && !document.hidden && (!locPopShown || !$('#locPop').hidden)) locPop(true);
     clearTimeout(gpsRetry); gpsRetry = setTimeout(startGPS, 2000);   // ON karte hi apne aap pakad lega
   } else {
     setChip('weak', 'Finding GPS…');
@@ -1822,9 +1822,9 @@ async function askPermissions(){
 async function initPerms(){
   const st = await refreshPerm();
   if (st.cam === 'granted' && st.loc === 'granted'){
-    // ijaazat pehle se hai: camera + GPS chalu; 3 sec mein dono na mile to screen dikhao
+    // ijaazat pehle se hai: camera + GPS peeche chalu; har baar shuruaati page (Auto Save switch) dikhao
     startCam(); startGPS();
-    setTimeout(() => { if (!readyCheck()) showPermScreen(); }, 3000);
+    openStartScreen();
   } else {
     $('#perm').hidden = false;
     if (st.cam === 'denied' || st.loc === 'denied') permHelp(DENIED_HELP);
@@ -1843,14 +1843,22 @@ async function initPerms(){
     }catch(e){}
   }
 }
+let permOk = false;   // Camera + Location ki ijaazat mil chuki hai
 function openStartScreen(){
   startManual = true;
-  $('#perm').hidden = false; permHelp(''); refreshPerm();
-  $('#permBtn').textContent = (stream && pos) ? 'Continue' : 'Allow access';
+  $('#perm').hidden = false; locPop(false); permHelp('');
+  refreshPerm().then(st => { permOk = st.cam === 'granted' && st.loc === 'granted'; $('#permBtn').textContent = permOk ? 'Continue' : 'Allow access'; });
 }
-$('#permBtn').onclick = () => { if (stream && pos){ startManual = false; $('#perm').hidden = true; } else askPermissions(); };
+$('#permBtn').onclick = () => {
+  if (permOk || (stream && pos)){
+    startManual = false; $('#perm').hidden = true;
+    if (!pos && gpsIsOff) locPop(true);       // Location band ho to chhota popup
+    return;
+  }
+  askPermissions();
+};
 // naye update ke baad ek baar shuruaati screen dikhao, taaki Auto Save ka switch dikhe
-if (!store.get('asIntro', 0)){ store.set('asIntro', 1); setTimeout(openStartScreen, 1200); }
+
 
 setNet();
 initPerms();
