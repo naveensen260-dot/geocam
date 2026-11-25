@@ -278,7 +278,7 @@ const $ = s => document.querySelector(s);
 const video = $('#video');
 let stream = null, facing = 'environment', pos = null, addr = null, geoAt = null;
 let outName = '', base = null, prev = null, snapNow = null, filterId = null, finalCache = null;
-const APP_VERSION = 'v2611.10';
+const APP_VERSION = 'v2611.15';
 const IS_GAS = typeof google !== 'undefined' && google.script && google.script.run;
 
 /* ---------- Local storage ---------- */
@@ -496,11 +496,15 @@ const clean = v => String(v || '').replace(/ (District|Block|Tehsil|Subdivision|
 /* Apni gaon-suchi: jahan free naksha mein naam nahi, wahan yahin se (bina internet ke bhi)
    Naya gaon jodne ke liye: { name:'Gaon', lat:.., lon:.., r: metre } */
 const LOCAL_PLACES = [
-  { name:'Bangru', lat:22.62886, lon:84.525877, r:1800 }
+  { name:'Bangru', lat:22.62886, lon:84.525877, r:1800 },
+  { name:'Gosaintoli', lat:22.591496, lon:84.494471, r:400 },
+  { name:'CINI Office', lat:22.601601, lon:84.498378, r:150 },
+  { name:'Bhattitoli', lat:22.601601, lon:84.498378, r:600 }
 ];
 function localPlace(la, lo){
-  let best = null, bd = Infinity;
-  for (const p of LOCAL_PLACES){ const d = distM([la, lo], [p.lat, p.lon]); if (d <= p.r && d < bd){ bd = d; best = p; } }
+  // jitne gheron ke andar hain, unme se sabse chhota ghera (office > mohalla > gaon)
+  let best = null;
+  for (const p of LOCAL_PLACES){ const d = distM([la, lo], [p.lat, p.lon]); if (d <= p.r && (!best || p.r < best.r)) best = p; }
   return best ? best.name : '';
 }
 /* Ola Maps (Bharat ka naksha) – gaon/tola ka naam */
@@ -556,6 +560,7 @@ async function maybeGeocode(){
     }
     const dist0 = clean(a.state_district || (ola && ola.district) || '').toLowerCase();
     if (village && dist0 && village.toLowerCase() === dist0) village = '';   // 'Simdega' gaon nahi, district/shahar hai
+    if (lp){ village = lp; tola = ''; }   // apni suchi ka naam hi pakka (dusre naksha ka tola bhi nahi)
     if (!village && tola && !town){ village = tola; tola = ''; }
     if (tola && village && tola.toLowerCase() === village.toLowerCase()) tola = '';
     addr = {
