@@ -278,7 +278,7 @@ const $ = s => document.querySelector(s);
 const video = $('#video');
 let stream = null, facing = 'environment', pos = null, addr = null, geoAt = null;
 let outName = '', base = null, prev = null, snapNow = null, filterId = null, finalCache = null;
-const APP_VERSION = 'v2611.16';
+const APP_VERSION = 'v2611.17';
 const IS_GAS = typeof google !== 'undefined' && google.script && google.script.run;
 
 /* ---------- Local storage ---------- */
@@ -500,7 +500,8 @@ const LOCAL_PLACES = [
   { name:'Gosaintoli', lat:22.591496, lon:84.494471, r:400 },
   { name:'CINI Office', lat:22.601601, lon:84.498378, r:150 },
   { name:'Bhattitoli', lat:22.601601, lon:84.498378, r:600 },
-  { name:'Pithra Tetartoli', lat:22.621815, lon:84.372905, r:400 }
+  { name:'Pithra Tetartoli', lat:22.621815, lon:84.372905, r:400 },
+  { name:'Shree Ram Hotel', lat:22.621097, lon:84.504876, r:160 }
 ];
 function localPlace(la, lo){
   // jitne gheron ke andar hain, unme se sabse chhota ghera (office > mohalla > gaon)
